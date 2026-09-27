@@ -4,3 +4,6 @@ games/
 test-results/
 playwright-report/
 .DS_Store
+public/fsf/
+public/coi-serviceworker.js
+public/dev-nnue/
