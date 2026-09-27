@@ -1,5 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { SETUPS, other, newBoard, legal, inCheck, make, kingIdx, bestMove } from "./engine.js";
+import { SETUPS, inCheck, kingIdx, bestMove } from "./engine.js";
+import { play as applyMove, undo as undoMove, canUndo, legalMoves } from "./game.js";
+import { createStore } from "./storage.js";
 import { toFen } from "./notation.js";
 import { choWin } from "./winrate.js";
 import { createAnalyzer } from "./analysis/fsf.js";
@@ -39,14 +41,14 @@ let analyzerP = null;
 const getAnalyzer = () => (analyzerP ??= createAnalyzer());
 
 function useAnalysis(b, turn, over) {
-  const [res, setRes] = useState(null); // { fen, win, depth, nnue } | { err }
+  const [res, setRes] = useState(null); // { fen, score, win, depth, nnue } | { err }
   const fen = toFen(b, turn);
   useEffect(() => {
     if (over) return;
     let alive = true;
     getAnalyzer()
       .then((a) => a.analyze(fen, 800))
-      .then((r) => { if (alive && r) setRes({ fen, win: choWin(r.score, turn), depth: r.depth, nnue: r.nnue, nnueError: r.nnueError }); })
+      .then((r) => { if (alive && r) setRes({ fen, score: r.score, win: choWin(r.score, turn), depth: r.depth, nnue: r.nnue, nnueError: r.nnueError }); })
       .catch((e) => { if (alive) setRes({ err: e.message }); });
     return () => { alive = false; };
   }, [fen, over]);
@@ -70,77 +72,64 @@ function WinBar({ a }) {
   );
 }
 
-function freshGame(aiSide, choSetup, hanSetup, level) {
-  const player = other(aiSide);
-  const b = newBoard(choSetup, hanSetup);
-  return { b, turn: "c", player, ai: aiSide, level, setups: { c: choSetup, h: hanSetup }, last: null, caps: { c: [], h: [] }, hist: [], over: null, msg: "", slide: false };
-}
-
 export default function Janggi() {
-  const [aiSide, setAiSide] = useState("h");
-  const [choSetup, setChoSetup] = useState("마상마상");
-  const [hanSetup, setHanSetup] = useState("마상마상");
-  const [level, setLevel] = useState(3);
-  const [g, setG] = useState(() => freshGame("h", "마상마상", "마상마상", 3));
+  const [session] = useState(() => {
+    const store = createStore();
+    return { store, ...store.loadLatest() };
+  });
+  const [g, setG] = useState(session.state);
+  const [controllers, setControllers] = useState(g.controllers);
+  const [choSetup, setChoSetup] = useState(g.setups.c);
+  const [hanSetup, setHanSetup] = useState(g.setups.h);
+  const [level, setLevel] = useState(g.level);
+  const [saveError, setSaveError] = useState(session.error);
+  const [corrupted, setCorrupted] = useState(session.corrupted);
   const [sel, setSel] = useState(null);
-  const [thinking, setThinking] = useState(false);
+  const thinking = !g.over && g.controllers[g.turn] === "engine";
   const gRef = useRef(g);
   gRef.current = g;
 
-  const flip = g.player === "h";
+  const flip = g.controllers.h === "human" && g.controllers.c !== "human";
   const xy = (i) => {
     let r = (i / 9) | 0, c = i % 9;
     if (flip) { r = 9 - r; c = 8 - c; }
     return [MG + c * S, MG + r * S];
   };
 
-  // 수 적용 후 다음 상태 계산 (외통수/강제 쉬기 포함)
-  function step(prev, m, pushHist, slide = true) {
-    const b = prev.b.slice();
-    const caps = { c: prev.caps.c.slice(), h: prev.caps.h.slice() };
-    let hist = prev.hist;
-    if (pushHist) hist = [...hist, { b: prev.b, caps: prev.caps, last: prev.last, turn: prev.turn, msg: prev.msg }];
-    let last = null, turn = prev.turn;
-    if (m) {
-      const cap = make(b, m);
-      if (cap) caps[other(cap[0])].push(cap);
-      last = m;
-    }
-    turn = other(turn);
-    let over = null, msg = "";
-    const ms = legal(b, turn), chk = inCheck(b, turn);
-    if (!ms.length && chk) {
-      over = other(turn);
-      msg = over === prev.player ? "외통수! 이겼어요." : "외통수예요. AI가 이겼어요.";
-    } else if (!ms.length) {
-      msg = `${NAME[turn]} 쪽이 둘 수 없어 한 수 쉽니다.`;
-      turn = other(turn);
-      last = null;
-    } else if (chk) {
-      msg = turn === prev.player ? "장군이에요! 궁을 지키세요." : "장군!";
-    } else if (!m) {
-      msg = "한 수 쉬었어요.";
-    }
-    return { ...prev, b, caps, hist, last, turn, over, msg, slide: !!m && slide };
-  }
-
-  // AI 차례면 계산
+  // 엔진의 타이머와 탐색은 화면 계층에만 있다. 무르기/새 판은 cleanup으로 취소한다.
   useEffect(() => {
-    if (g.over || g.turn !== g.ai) return;
-    setThinking(true);
+    if (!thinking) return;
     const t = setTimeout(() => {
-      const cur = gRef.current;
-      const m = bestMove(cur.b, cur.turn, cur.level);
-      setG(step(cur, m, false));
-      setThinking(false);
+      if (gRef.current !== g) return;
+      const m = bestMove(g.b.slice(), g.turn, g.level);
+      setG({ ...applyMove(g, m ?? "pass"), slide: true });
     }, 420);
     return () => clearTimeout(t);
-  }, [g]);
+  }, [g, thinking]);
 
-  const myTurn = !g.over && !thinking && g.turn === g.player;
-  const targets = sel !== null && myTurn ? legal(g.b, g.player).filter((m) => m[0] === sel) : [];
+  const myTurn = !g.over && g.controllers[g.turn] === "human";
+  const targets = sel !== null && myTurn ? legalMoves(g).filter((m) => m[0] === sel) : [];
   const checkKing = !g.over && inCheck(g.b, g.turn) ? kingIdx(g.b, g.turn) : -1;
   const analysis = useAnalysis(g.b, g.turn, g.over);
+  const cacheRef = useRef({ id: g.id, analysis: g.analysis });
+
+  // 분석 캐시 변경은 엔진 타이머를 다시 시작하지 않는다. 현재 판과 일치하는 결과만 저장한다.
+  useEffect(() => {
+    if (cacheRef.current.id !== g.id) cacheRef.current = { id: g.id, analysis: g.analysis };
+    let cache = cacheRef.current.analysis;
+    const ply = g.moves.length;
+    if (cache) cache = { ...cache, evals: cache.evals.slice(0, ply + 1) };
+    if (analysis?.score && analysis.fen === toFen(g.b, g.turn)) {
+      const engine = `fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=${analysis.nnue === "on" ? "janggi-9991472750de" : "off"} movetime=800`;
+      const evals = cache?.engine === engine ? [...cache.evals] : [];
+      while (evals.length <= ply) evals.push(null);
+      const kind = analysis.score.cp != null ? "cp" : "mate";
+      evals[ply] = { ply, [kind]: analysis.score[kind] * (g.turn === "c" ? 1 : -1), win: analysis.win, depth: analysis.depth };
+      cache = { engine, evals };
+    }
+    cacheRef.current.analysis = cache;
+    setSaveError(session.store.save({ ...g, analysis: cache }).error);
+  }, [g, analysis, session.store]);
 
   // ---- 드래그 & 탭 ----
   const svgRef = useRef(null);
@@ -157,8 +146,8 @@ export default function Janggi() {
     if (flip) { r = 9 - r; c = 8 - c; }
     return r * 9 + c;
   };
-  const movesFrom = (i) => legal(g.b, g.player).filter((m) => m[0] === i);
-  function play(m, slide) { setSel(null); setDrag(null); setG(step(g, m, true, slide)); }
+  const movesFrom = (i) => legalMoves(g).filter((m) => m[0] === i);
+  function play(m, slide) { setSel(null); setDrag(null); setG({ ...applyMove(g, m), slide }); }
 
   function onDown(e) {
     if (!myTurn) return;
@@ -167,7 +156,7 @@ export default function Janggi() {
     const t = targets.find((m) => m[1] === i);
     if (t) { play(t, true); return; }           // 선택 후 목적지를 탭
     const p = g.b[i];
-    if (p && p[0] === g.player) {
+    if (p && p[0] === g.turn) {
       e.currentTarget.setPointerCapture(e.pointerId);
       setDrag({ i, x, y, moved: false, wasSel: sel === i });
       setSel(i);
@@ -202,29 +191,22 @@ export default function Janggi() {
   }, [g.last, g.slide]);
 
   function undo() {
-    if (!g.hist.length || thinking) return;
-    const h = g.hist[g.hist.length - 1];
-    setSel(null);
-    setG({ ...g, ...h, hist: g.hist.slice(0, -1), over: null, msg: "무르기 했어요." });
+    if (!canUndo(g)) return;
+    setSel(null); setDrag(null);
+    setG({ ...undoMove(g), slide: false });
   }
   function pass() {
-    if (!myTurn || inCheck(g.b, g.player)) return;
-    setSel(null);
-    setG(step(g, null, true));
+    if (!myTurn || inCheck(g.b, g.turn)) return;
+    play("pass", false);
   }
   function restart() {
-    setSel(null);
-    setThinking(false);
-    setG(freshGame(aiSide, choSetup, hanSetup, level));
+    setSel(null); setDrag(null); setCorrupted(null);
+    setG(session.store.newGame({ controllers, level, setups: { c: choSetup, h: hanSetup } }));
   }
 
-  const status = g.over
-    ? g.msg
-    : thinking
-    ? "AI가 생각하는 중…"
-    : g.msg && g.turn === g.player
-    ? g.msg
-    : `내 차례예요 · ${NAME[g.player]}`;
+  const oneHuman = Object.values(g.controllers).filter((c) => c === "human").length === 1;
+  const status = g.over ? g.msg : thinking ? "엔진이 생각하는 중…"
+    : g.msg || (oneHuman ? `내 차례예요 · ${NAME[g.turn]}` : `${NAME[g.turn]} 차례예요.`);
 
   const Tray = ({ side }) => (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3, minHeight: 28, alignItems: "center", padding: "2px 4px" }}>
@@ -247,9 +229,11 @@ export default function Janggi() {
           <h1 style={{ fontSize: 32, fontWeight: 900, margin: 0, letterSpacing: "0.05em" }}>장기</h1>
           <div style={{ fontSize: 16, color: g.over || status.includes("장군") ? COL.h : "#261d15", fontWeight: g.over ? 700 : 400 }}>{status}</div>
         </div>
-        <div style={{ fontSize: 13, color: "#65584a" }}>AI는 {NAME[g.ai]}. 상차림은 초 {g.setups.c}, 한 {g.setups.h}</div>
+        <div style={{ fontSize: 13, color: "#65584a" }}>초 {g.controllers.c === "human" ? "사람" : "엔진"} · 한 {g.controllers.h === "human" ? "사람" : "엔진"}. 상차림은 초 {g.setups.c}, 한 {g.setups.h}</div>
+        {saveError && <div role="alert" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>{saveError}</div>}
+        {corrupted && <div role="status" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>최근 기보 손상됨 — 새 게임을 시작했어요.</div>}
         <WinBar a={analysis} />
-        <Tray side={g.ai} />
+        <Tray side={flip ? "c" : "h"} />
         <div style={{ borderRadius: 10, overflow: "hidden", boxShadow: "0 10px 30px rgba(40,20,5,.35)" }}>
           <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)} style={{ display: "block", width: "100%", height: "auto", userSelect: "none", touchAction: "none", cursor: myTurn ? "pointer" : "default" }}>
             <defs>
@@ -305,33 +289,33 @@ export default function Janggi() {
             )}
           </svg>
         </div>
-        <Tray side={g.player} />
+        <Tray side={flip ? "h" : "c"} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 10 }}>
-          <button style={{ ...btn, opacity: g.hist.length && !thinking ? 1 : 0.4 }} onClick={undo}>무르기</button>
-          <button style={{ ...btn, opacity: myTurn && !inCheck(g.b, g.player) ? 1 : 0.4 }} onClick={pass}>한 수 쉬기</button>
+          <button style={{ ...btn, opacity: canUndo(g) ? 1 : 0.4 }} disabled={!canUndo(g)} onClick={undo}>무르기</button>
+          <button style={{ ...btn, opacity: myTurn && !inCheck(g.b, g.turn) ? 1 : 0.4 }} disabled={!myTurn || inCheck(g.b, g.turn)} onClick={pass}>한 수 쉬기</button>
           <button style={btn} onClick={restart}>새 게임</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, marginTop: 10 }}>
-          <label style={lab}>AI가 둘 편
-            <select style={selStyle} value={aiSide} onChange={(e) => setAiSide(e.target.value)}>
-              <option value="c">파랑 (초, 선수)</option>
-              <option value="h">빨강 (한, 후수)</option>
+          {["c", "h"].map((side) => <label key={side} style={lab}>{NAME[side]}
+            <select aria-label={NAME[side]} style={selStyle} value={controllers[side]} onChange={(e) => setControllers({ ...controllers, [side]: e.target.value })}>
+              <option value="human">사람</option>
+              <option value="engine">엔진</option>
             </select>
-          </label>
+          </label>)}
           <label style={lab}>난이도
-            <select style={selStyle} value={level} onChange={(e) => setLevel(+e.target.value)}>
+            <select aria-label="난이도" style={selStyle} value={level} onChange={(e) => setLevel(+e.target.value)}>
               <option value={2}>쉬움</option>
               <option value={3}>보통</option>
               <option value={4}>어려움</option>
             </select>
           </label>
           <label style={lab}>초(파랑) 상차림
-            <select style={{ ...selStyle, color: COL.c }} value={choSetup} onChange={(e) => setChoSetup(e.target.value)}>
+            <select aria-label="초(파랑) 상차림" style={{ ...selStyle, color: COL.c }} value={choSetup} onChange={(e) => setChoSetup(e.target.value)}>
               {Object.keys(SETUPS).map((k) => <option key={k}>{k}</option>)}
             </select>
           </label>
           <label style={lab}>한(빨강) 상차림
-            <select style={{ ...selStyle, color: COL.h }} value={hanSetup} onChange={(e) => setHanSetup(e.target.value)}>
+            <select aria-label="한(빨강) 상차림" style={{ ...selStyle, color: COL.h }} value={hanSetup} onChange={(e) => setHanSetup(e.target.value)}>
               {Object.keys(SETUPS).map((k) => <option key={k}>{k}</option>)}
             </select>
           </label>
