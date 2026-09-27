@@ -48,3 +48,34 @@ describe("M1 UI rendering", () => {
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>무르기<\/button>/);
   });
 });
+
+describe("M2 UI rendering", () => {
+  it("offers max, hints off by default, a local NNUE picker and the estimate explanation", () => {
+    vi.stubGlobal("localStorage", fake());
+    const html = render();
+    expect(html).toContain('value="max"');
+    expect(html).toContain("최강");
+    expect(html).toMatch(/<input[^>]*type="checkbox"[^>]*\/>후보 수 보기/);
+    expect(html).not.toMatch(/type="checkbox"[^>]*checked/);
+    expect(html).toContain('accept=".nnue"');
+    expect(html).toContain("https://fairy-stockfish.github.io/nnue/");
+    expect(html).toContain("기본 평가(약함)");
+    expect(html).toContain("평가 점수를 체스 기준 식으로 바꾼 추정치");
+  });
+  it("disables max with an isolation reason and halts a restored max engine turn", () => {
+    vi.stubGlobal("crossOriginIsolated", false);
+    const saved = { ...record, level: "max", controllers: { c: "engine", h: "human" }, moves: [] };
+    vi.stubGlobal("localStorage", fake({ "janggi.index": JSON.stringify([{ id }]), [`janggi.game.${id}`]: JSON.stringify(saved) }));
+    const html = render();
+    expect(html).toMatch(/<option[^>]*value="max"[^>]*disabled=""/);
+    expect(html).toContain("교차 출처 격리 안 됨");
+    expect(html).not.toContain("엔진이 생각하는 중…");
+  });
+  it("shows last-move mover delta and grade from persisted Cho evaluations", () => {
+    const saved = { ...record, analysis: { engine: "test", evals: [
+      { ply: 0, cp: 190, win: 65, depth: 12 }, { ply: 1, cp: -190, win: 35, depth: 12 },
+    ] } };
+    vi.stubGlobal("localStorage", fake({ "janggi.index": JSON.stringify([{ id }]), [`janggi.game.${id}`]: JSON.stringify(saved) }));
+    expect(render()).toContain("초 a4a5 −30%p 대실수 ??");
+  });
+});

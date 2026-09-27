@@ -9,3 +9,16 @@ export function choWin(s, turn) {
   const w = winFromScore(s);
   return turn === "c" ? w : 100 - w;
 }
+
+// 저장된 초 승률 두 개 → 실제로 둔 쪽의 변화(%p).
+export const moveDelta = (before, after, mover) => (after - before) * (mover === "c" ? 1 : -1);
+
+export function grade(delta, forcedPass = false) {
+  if (forcedPass) return null;
+  if (delta <= -30) return "대실수 ??";
+  if (delta <= -20) return "실수 ?";
+  if (delta <= -10) return "부정확 ?!";
+  return null;
+}
+
+export const gradeColor = (delta) => delta <= -30 ? "#ae2219" : delta <= -20 ? "#c56516" : delta <= -10 ? "#aa8200" : "#28783d";

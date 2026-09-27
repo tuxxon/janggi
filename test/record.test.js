@@ -10,6 +10,11 @@ const record = (extra = {}) => ({ v: 1, ...meta, ...options, moves: [], result: 
 afterEach(() => vi.restoreAllMocks());
 
 describe("record v1", () => {
+  it("roundtrips max difficulty without coercing it to a numeric level", () => {
+    const saved = record({ level: "max" });
+    expect(records.toRecord(records.replay(saved).state)).toEqual(saved);
+    expect(() => records.replay(record({ level: "5" }))).toThrow("난이도");
+  });
   it("serializes only canonical v1 fields, leaving metadata creation to storage", () => {
     const state = play(initial(), [54, 45]);
     expect(records.toRecord(state)).toEqual({ v: 1, ...meta, controllers: { c: "human", h: "engine" }, level: 3,

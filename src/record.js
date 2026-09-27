@@ -13,7 +13,7 @@ function validate(record) {
     if (!Object.hasOwn(SETUPS, record.setups?.[side])) bad("상차림");
     if (!["human", "engine"].includes(record.controllers?.[side])) bad("컨트롤러");
   }
-  if (![2, 3, 4].includes(record.level)) bad("난이도");
+  if (![2, 3, 4, "max"].includes(record.level)) bad("난이도");
   if (!Array.isArray(record.moves)) bad("수순");
   if (record.result !== null && (!record.result || !["c", "h"].includes(record.result.winner) || record.result.reason !== "외통수")) bad("결과");
 }

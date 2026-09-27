@@ -1,16 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { NNUE } from "../src/analysis/fsf.js";
+import { replay } from "../src/record.js";
 
-// 신경망 "배달 경로"와 무관하게 "브라우저 WASM 이 신경망을 쓰는가"만 검증하려고, Drive 요청을 로컬 파일로 바꿔치기한다.
-// (Drive 는 브라우저 교차 출처 요청에 403 — 2026-09-28 실측. 배달 방식은 별도 결정.)
 const LOCAL_NNUE = `${homedir()}/.janggi/${NNUE.name}`;
-test.beforeEach(async ({ context }) => {
-  if (!existsSync(LOCAL_NNUE)) return;
-  await context.route(NNUE.url, (route) =>
-    route.fulfill({ status: 200, body: readFileSync(LOCAL_NNUE), headers: { "access-control-allow-origin": "*", "content-type": "application/octet-stream" } }));
-});
 
 const START_FEN = "rnba1abnr/4k4/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/4K4/RNBA1ABNR w - - 0 1";
 
@@ -23,21 +17,23 @@ async function clickSq(page, r, c) {
   await page.mouse.click(box.x + (40 + c * 60) * k, box.y + (40 + r * 60) * k);
 }
 
-test("앱이 뜨고, 격리가 켜지고, 신경망 승률이 나오고, 수를 두면 다시 분석한다", async ({ page }) => {
-  test.skip(!existsSync(LOCAL_NNUE), `로컬 신경망 없음: ${LOCAL_NNUE}`);
+test("앱이 뜨고, 격리가 켜지고, 기본 평가 승률이 나오고, 모든 수를 분석한다", async ({ page }) => {
+  const externalRequests = [];
+  page.on("request", (request) => { if (/drive\.(usercontent\.)?google\.com/.test(request.url())) externalRequests.push(request.url()); });
   await page.goto("/janggi/");
   await expect(page.getByRole("heading", { name: "장기" })).toBeVisible();
 
   // coi-serviceworker 가 한 번 새로고침한 뒤 격리돼야 한다(Pages 와 같은 경로).
   await expect.poll(() => page.evaluate(() => self.crossOriginIsolated), { timeout: 20_000 }).toBe(true);
 
-  // 기본 상차림(양쪽 마상마상)이 아닌 FSF startpos 비교는 단위 테스트가 한다. 여기서는 신경망 적용과 값의 범위.
+  // 배포본에는 신경망이 없다. 기본 평가도 모든 국면을 분석한다.
   const bar = page.getByTestId("winbar");
-  await expect(bar).toHaveAttribute("data-nnue", "on", { timeout: 120_000 });
+  await expect(bar).toHaveAttribute("data-nnue", "off");
+  await expect(bar).toContainText("기본 평가(약함)");
   await expect(bar).toHaveAttribute("data-cho-win", /\d/, { timeout: 30_000 });
   const w0 = Number(await bar.getAttribute("data-cho-win"));
-  expect(w0).toBeGreaterThan(30);
-  expect(w0).toBeLessThan(70);
+  expect(w0).toBeGreaterThanOrEqual(0);
+  expect(w0).toBeLessThanOrEqual(100);
   const fen0 = await bar.getAttribute("data-fen");
   expect(fen0).not.toBe(START_FEN); // 원본 기본값은 마상마상 → FSF startpos(마상상마)와 다르다
 
@@ -47,6 +43,9 @@ test("앱이 뜨고, 격리가 켜지고, 신경망 승률이 나오고, 수를 
   await expect(page.getByText("내 차례예요")).toBeVisible({ timeout: 20_000 });
   await expect(bar).not.toHaveAttribute("data-fen", fen0, { timeout: 30_000 });
   await expect(bar).toHaveAttribute("data-fen", / w - - 0 1$/, { timeout: 30_000 }); // 다시 초 차례
+  await expect.poll(async () => (await latestRecord(page))?.analysis?.evals.map((e) => e?.ply), { timeout: 30_000 }).toEqual([0, 1, 2]);
+  await expect(page.getByTestId("last-evaluation")).toContainText("한");
+  expect(externalRequests).toEqual([]);
   await page.screenshot({ path: "test-results/smoke.png", fullPage: true });
 });
 
@@ -154,4 +153,73 @@ test("손상된 최신 기보를 보존하고 새 판을 연다", async ({ page 
   await expect(page.getByText(/손상됨.*새 게임/)).toBeVisible();
   await expect.poll(async () => (await latestRecord(page))?.moves).toEqual([]);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("janggi.index")).find((e) => e.id === "2026-09-28T00-00-00-000").status)).toBe("손상됨");
+});
+
+test("최강은 엔진 차례에 합법 수를 두고 그 탐색을 기보 분석으로 저장한다", async ({ page }) => {
+  await openGame(page);
+  await expect(page.locator('option[value="max"]')).toBeEnabled({ timeout: 30_000 });
+  await page.getByLabel("난이도", { exact: true }).selectOption("max");
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await clickSq(page, 6, 0); await clickSq(page, 5, 0);
+  await expect.poll(async () => (await latestRecord(page))?.moves.length, { timeout: 30_000 }).toBe(2);
+  const saved = await latestRecord(page);
+  expect(saved.level).toBe("max");
+  // replay calls the original game.play legality checks, including voluntary pass.
+  expect(replay(saved).state.turn).toBe("c");
+  await expect.poll(async () => (await latestRecord(page))?.analysis?.evals.map((e) => e?.ply), { timeout: 30_000 }).toEqual([0, 1, 2]);
+  expect((await latestRecord(page)).analysis.engine).toContain("max-movetime=1000");
+  await expect(page.getByText("내 차례예요 · 초(파랑)", { exact: true })).toBeVisible();
+});
+
+test("후보 수 보기는 선택한 기물의 도착 칸에 승률을 붙이고 선택 해제 시 지운다", async ({ page }) => {
+  await openGame(page);
+  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human");
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await expect(page.getByLabel("후보 수 보기")).not.toBeChecked();
+  await page.getByLabel("후보 수 보기").check();
+  await clickSq(page, 6, 0);
+  await expect(page.getByTestId("target-win")).toHaveCount(2, { timeout: 30_000 });
+  await expect(page.getByTestId("target-win").locator("text").first()).toHaveText(/\d+%/);
+  expect(await page.getByTestId("target-win").evaluateAll((els) => els.map((el) => el.dataset.move).sort())).toEqual(["a4a5", "a4b4"]);
+  await expect(page.getByTestId("candidates").locator("li")).toHaveCount(5);
+  await clickSq(page, 6, 2);
+  await expect(page.getByTestId("target-win")).toHaveCount(3, { timeout: 30_000 });
+  expect(await page.getByTestId("target-win").evaluateAll((els) => els.map((el) => el.dataset.move).sort())).toEqual(["c4b4", "c4c5", "c4d4"]);
+  await page.setViewportSize({ width: 360, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/m2-hints-mobile.png", fullPage: true });
+  await clickSq(page, 6, 2);
+  await expect(page.getByTestId("target-win")).toHaveCount(0);
+  await page.getByLabel("후보 수 보기").uncheck();
+  await expect(page.getByTestId("candidate-win")).toHaveCount(0);
+});
+
+test("신경망 파일 선택은 NNUE를 켜고 캐시에서 복원하며 지우면 기본 평가로 돌아간다", async ({ page }) => {
+  test.skip(!existsSync(LOCAL_NNUE), `로컬 신경망 없음: ${LOCAL_NNUE}`);
+  await openGame(page);
+  const bar = page.getByTestId("winbar");
+  await expect(bar).toHaveAttribute("data-cho-win", /\d/, { timeout: 30_000 });
+  await expect(bar).toHaveAttribute("data-nnue", "off");
+  await page.getByLabel("신경망 넣기", { exact: true }).setInputFiles(LOCAL_NNUE);
+  await expect(bar).toHaveAttribute("data-nnue", "on", { timeout: 30_000 });
+  await expect(bar).toHaveAttribute("data-cho-win", /\d/, { timeout: 30_000 });
+  await page.reload();
+  await expect(bar).toHaveAttribute("data-nnue", "on", { timeout: 30_000 });
+  await page.getByRole("button", { name: "신경망 지우기" }).click();
+  await expect(bar).toHaveAttribute("data-nnue", "off", { timeout: 30_000 });
+  await expect(bar).toHaveAttribute("data-cho-win", /\d/, { timeout: 30_000 });
+  await page.reload();
+  await expect(bar).toHaveAttribute("data-cho-win", /\d/, { timeout: 30_000 });
+  await expect(bar).toHaveAttribute("data-nnue", "off");
+});
+
+test("잘못된 신경망 파일은 이유를 표시하고 캐시에 넣지 않는다", async ({ page }) => {
+  await openGame(page);
+  await page.getByLabel("신경망 넣기", { exact: true }).setInputFiles({ name: "wrong.nnue", mimeType: "application/octet-stream", buffer: Buffer.from("bad network") });
+  await expect(page.getByRole("alert")).toContainText("NNUE 크기가 달라요");
+  const bar = page.getByTestId("winbar");
+  await expect(bar).toHaveAttribute("data-nnue", "off");
+  await page.reload();
+  await expect(bar).toHaveAttribute("data-cho-win", /\d/, { timeout: 30_000 });
+  await expect(bar).toHaveAttribute("data-nnue", "off");
 });

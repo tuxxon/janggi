@@ -1,10 +1,12 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { SETUPS, inCheck, kingIdx, bestMove } from "./engine.js";
+import { SETUPS, inCheck, kingIdx } from "./engine.js";
 import { play as applyMove, undo as undoMove, canUndo, legalMoves } from "./game.js";
 import { createStore } from "./storage.js";
-import { toFen } from "./notation.js";
-import { choWin } from "./winrate.js";
-import { createAnalyzer } from "./analysis/fsf.js";
+import { toFen, moveToUci } from "./notation.js";
+import { moveDelta, grade } from "./winrate.js";
+import { useAnalysis } from "./analysis/useAnalysis.js";
+import { engineTurn } from "./analysis/gameAnalysis.js";
+import { HintLabels } from "./analysis/HintLabels.jsx";
 
 // ===== React 화면 =====
 
@@ -37,29 +39,12 @@ function Piece({ p, x, y, selected, lifted }) {
 }
 
 // ---- 승률 분석 (Fairy-Stockfish WASM) ----
-let analyzerP = null;
-const getAnalyzer = () => (analyzerP ??= createAnalyzer());
-
-function useAnalysis(b, turn, over) {
-  const [res, setRes] = useState(null); // { fen, score, win, depth, nnue } | { err }
-  const fen = toFen(b, turn);
-  useEffect(() => {
-    if (over) return;
-    let alive = true;
-    getAnalyzer()
-      .then((a) => a.analyze(fen, 800))
-      .then((r) => { if (alive && r) setRes({ fen, score: r.score, win: choWin(r.score, turn), depth: r.depth, nnue: r.nnue, nnueError: r.nnueError }); })
-      .catch((e) => { if (alive) setRes({ err: e.message }); });
-    return () => { alive = false; };
-  }, [fen, over]);
-  return res;
-}
-
-function WinBar({ a }) {
-  const w = a && a.win != null ? a.win : null;
-  const note = !a ? "엔진 준비 중…" : a.err ? a.err : a.nnue === "on" ? `NNUE · 깊이 ${a.depth}` : `NNUE 없음(약한 평가)${a.nnueError ? " · " + a.nnueError : ""}`;
+function WinBar({ a, status, fen }) {
+  const w = a?.win ?? null;
+  const note = status.state === "disabled" ? status.reason : status.state === "loading" ? "엔진 준비 중…"
+    : status.pending ? `분석 중 (${status.pending}개 남음)` : a ? `깊이 ${a.depth}` : "";
   return (
-    <div data-testid="winbar" data-nnue={a?.nnue ?? "loading"} data-cho-win={w != null ? w.toFixed(1) : ""} data-fen={a?.fen ?? ""} style={{ margin: "6px 0 4px" }}>
+    <div data-testid="winbar" data-nnue={status.nnue} data-cho-win={w != null ? w.toFixed(1) : ""} data-fen={a ? fen : ""} style={{ margin: "6px 0 4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700 }}>
         <span style={{ color: COL.c, minWidth: 64 }}>초 {w == null ? "–" : Math.round(w)}%</span>
         <div style={{ flex: 1, height: 10, borderRadius: 5, overflow: "hidden", background: COL.h, opacity: w == null ? 0.25 : 1 }}>
@@ -67,7 +52,9 @@ function WinBar({ a }) {
         </div>
         <span style={{ color: COL.h, minWidth: 64, textAlign: "right" }}>{w == null ? "–" : Math.round(100 - w)}% 한</span>
       </div>
-      <div style={{ fontSize: 11, color: "#65584a", marginTop: 2 }}>승률(추정) · {note}</div>
+      <div title="평가 점수를 체스 기준 식으로 바꾼 추정치" style={{ fontSize: 11, color: "#65584a", marginTop: 2 }}>
+        승률(추정) · {status.nnue === "on" ? "NNUE" : "기본 평가(약함)"} · {note}
+      </div>
     </div>
   );
 }
@@ -85,9 +72,16 @@ export default function Janggi() {
   const [saveError, setSaveError] = useState(session.error);
   const [corrupted, setCorrupted] = useState(session.corrupted);
   const [sel, setSel] = useState(null);
+  const [hints, setHints] = useState(false);
+  const [focused, setFocused] = useState(null);
+  const [moveError, setMoveError] = useState(null);
+  const [networkError, setNetworkError] = useState(null);
+  const [networkBusy, setNetworkBusy] = useState(false);
   const thinking = !g.over && g.controllers[g.turn] === "engine";
   const gRef = useRef(g);
   gRef.current = g;
+  const analysis = useAnalysis(g);
+  const { serviceRef } = analysis;
 
   const flip = g.controllers.h === "human" && g.controllers.c !== "human";
   const xy = (i) => {
@@ -99,37 +93,47 @@ export default function Janggi() {
   // 엔진의 타이머와 탐색은 화면 계층에만 있다. 무르기/새 판은 cleanup으로 취소한다.
   useEffect(() => {
     if (!thinking) return;
-    const t = setTimeout(() => {
-      if (gRef.current !== g) return;
-      const m = bestMove(g.b.slice(), g.turn, g.level);
-      setG({ ...applyMove(g, m ?? "pass"), slide: true });
-    }, 420);
-    return () => clearTimeout(t);
-  }, [g, thinking]);
+    let alive = true;
+    const run = async () => {
+      try {
+        const next = await engineTurn(g, serviceRef.current);
+        if (alive && gRef.current === g && next) setG({ ...next, slide: true });
+      } catch (error) {
+        if (alive && gRef.current === g) setMoveError({ game: g, message: error.message });
+      }
+    };
+    const t = g.level === "max" ? null : setTimeout(run, 420);
+    if (g.level === "max") void run();
+    return () => { alive = false; clearTimeout(t); };
+  }, [g, thinking, serviceRef]);
 
   const myTurn = !g.over && g.controllers[g.turn] === "human";
   const targets = sel !== null && myTurn ? legalMoves(g).filter((m) => m[0] === sel) : [];
   const checkKing = !g.over && inCheck(g.b, g.turn) ? kingIdx(g.b, g.turn) : -1;
-  const analysis = useAnalysis(g.b, g.turn, g.over);
-  const cacheRef = useRef({ id: g.id, analysis: g.analysis });
-
-  // 분석 캐시 변경은 엔진 타이머를 다시 시작하지 않는다. 현재 판과 일치하는 결과만 저장한다.
+  // 과거 ply 결과도 저장하되, 분석 갱신이 엔진 차례를 다시 실행하지는 않는다.
   useEffect(() => {
-    if (cacheRef.current.id !== g.id) cacheRef.current = { id: g.id, analysis: g.analysis };
-    let cache = cacheRef.current.analysis;
-    const ply = g.moves.length;
-    if (cache) cache = { ...cache, evals: cache.evals.slice(0, ply + 1) };
-    if (analysis?.score && analysis.fen === toFen(g.b, g.turn)) {
-      const engine = `fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=${analysis.nnue === "on" ? "janggi-9991472750de" : "off"} movetime=800`;
-      const evals = cache?.engine === engine ? [...cache.evals] : [];
-      while (evals.length <= ply) evals.push(null);
-      const kind = analysis.score.cp != null ? "cp" : "mate";
-      evals[ply] = { ply, [kind]: analysis.score[kind] * (g.turn === "c" ? 1 : -1), win: analysis.win, depth: analysis.depth };
-      cache = { engine, evals };
-    }
-    cacheRef.current.analysis = cache;
-    setSaveError(session.store.save({ ...g, analysis: cache }).error);
-  }, [g, analysis, session.store]);
+    setSaveError(session.store.save({ ...g, analysis: analysis.cache }).error);
+  }, [g, analysis.cache, session.store]);
+
+  useEffect(() => {
+    setFocused(null);
+    const service = serviceRef.current;
+    if (!hints || sel === null || !myTurn || !analysis.current || !targets.length) return;
+    let alive = true;
+    service.focus(g.moves.length, targets.map(moveToUci)).then((candidates) => {
+      if (alive && candidates) setFocused({ game: g, sel, candidates });
+    });
+    return () => { alive = false; service.cancelFocus(); };
+  }, [g, sel, hints, myTurn, analysis.current, serviceRef]);
+
+  async function updateNetwork(file) {
+    setNetworkBusy(true); setNetworkError(null);
+    try {
+      if (file) await serviceRef.current.addNetwork(file);
+      else await serviceRef.current.clearNetwork();
+    } catch (error) { setNetworkError(error.message); }
+    finally { setNetworkBusy(false); }
+  }
 
   // ---- 드래그 & 탭 ----
   const svgRef = useRef(null);
@@ -205,8 +209,16 @@ export default function Janggi() {
   }
 
   const oneHuman = Object.values(g.controllers).filter((c) => c === "human").length === 1;
-  const status = g.over ? g.msg : thinking ? "엔진이 생각하는 중…"
-    : g.msg || (oneHuman ? `내 차례예요 · ${NAME[g.turn]}` : `${NAME[g.turn]} 차례예요.`);
+  const engineError = moveError?.game === g ? moveError.message
+    : thinking && g.level === "max" && analysis.status.state === "disabled" ? analysis.status.reason : null;
+  const status = g.over ? g.msg : engineError || (thinking ? "엔진이 생각하는 중…"
+    : g.msg || (oneHuman ? `내 차례예요 · ${NAME[g.turn]}` : `${NAME[g.turn]} 차례예요.`));
+  const ply = g.moves.length, previous = g.hist.at(-1), evals = analysis.cache?.evals;
+  const delta = previous && evals?.[ply - 1] && evals?.[ply] ? moveDelta(evals[ply - 1].win, evals[ply].win, previous.turn) : null;
+  const lastEvaluation = delta === null ? null : `${previous.turn === "c" ? "초" : "한"} ${g.moves.at(-1)} ${delta < 0 ? "−" : "+"}${Math.abs(delta).toFixed(0)}%p${grade(delta) ? " " + grade(delta) : ""}`;
+  const candidates = hints ? analysis.current?.candidates ?? [] : [];
+  const focusCandidates = hints && focused?.game === g && focused.sel === sel ? focused.candidates : [];
+  const turnWin = analysis.evaluation ? g.turn === "c" ? analysis.evaluation.win : 100 - analysis.evaluation.win : 50;
 
   const Tray = ({ side }) => (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3, minHeight: 28, alignItems: "center", padding: "2px 4px" }}>
@@ -227,12 +239,22 @@ export default function Janggi() {
       <div style={{ maxWidth: 560, margin: "0 auto", padding: "18px 14px 28px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <h1 style={{ fontSize: 32, fontWeight: 900, margin: 0, letterSpacing: "0.05em" }}>장기</h1>
-          <div style={{ fontSize: 16, color: g.over || status.includes("장군") ? COL.h : "#261d15", fontWeight: g.over ? 700 : 400 }}>{status}</div>
+          <div style={{ fontSize: 16, color: g.over || engineError || status.includes("장군") ? COL.h : "#261d15", fontWeight: g.over ? 700 : 400 }}>{status}</div>
         </div>
+        {lastEvaluation && <div data-testid="last-evaluation" style={{ fontSize: 13, marginBottom: 4 }}>{lastEvaluation}</div>}
         <div style={{ fontSize: 13, color: "#65584a" }}>초 {g.controllers.c === "human" ? "사람" : "엔진"} · 한 {g.controllers.h === "human" ? "사람" : "엔진"}. 상차림은 초 {g.setups.c}, 한 {g.setups.h}</div>
         {saveError && <div role="alert" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>{saveError}</div>}
         {corrupted && <div role="status" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>최근 기보 손상됨 — 새 게임을 시작했어요.</div>}
-        <WinBar a={analysis} />
+        <WinBar a={analysis.evaluation} status={analysis.status} fen={toFen(g.b, g.turn)} />
+        <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
+          <input type="checkbox" checked={hints} onChange={(e) => setHints(e.target.checked)} />후보 수 보기
+        </label>
+        {hints && <div style={{ fontSize: 12, color: "#65584a", marginTop: 4 }}>
+          {g.turn === "c" ? "초" : "한"}가 둘 수 · 두는 쪽 승률
+          <ol data-testid="candidates" style={{ display: "flex", flexWrap: "wrap", gap: "4px 20px", paddingLeft: 20, margin: "4px 0" }}>
+            {candidates.map((candidate) => <li key={candidate.move}>{candidate.move === "pass" ? "쉬기" : candidate.move} {Math.round(candidate.win)}%</li>)}
+          </ol>
+        </div>}
         <Tray side={flip ? "c" : "h"} />
         <div style={{ borderRadius: 10, overflow: "hidden", boxShadow: "0 10px 30px rgba(40,20,5,.35)" }}>
           <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)} style={{ display: "block", width: "100%", height: "auto", userSelect: "none", touchAction: "none", cursor: myTurn ? "pointer" : "default" }}>
@@ -287,6 +309,8 @@ export default function Janggi() {
                 <Piece p={g.b[drag.i]} x={drag.x} y={drag.y} selected lifted />
               </g>
             )}
+            {hints && <HintLabels candidates={candidates} focused={focusCandidates} targets={targets} turnWin={turnWin}
+              passSquare={kingIdx(g.b, g.turn)} hovered={drag?.moved ? idxAt(drag.x, drag.y) : null} xy={xy} />}
           </svg>
         </div>
         <Tray side={flip ? "h" : "c"} />
@@ -303,11 +327,13 @@ export default function Janggi() {
             </select>
           </label>)}
           <label style={lab}>난이도
-            <select aria-label="난이도" style={selStyle} value={level} onChange={(e) => setLevel(+e.target.value)}>
+            <select aria-label="난이도" style={selStyle} value={level} onChange={(e) => setLevel(e.target.value === "max" ? "max" : +e.target.value)}>
               <option value={2}>쉬움</option>
               <option value={3}>보통</option>
               <option value={4}>어려움</option>
+              <option value="max" disabled={analysis.status.state !== "ready"}>최강</option>
             </select>
+            {analysis.status.state !== "ready" && <span>최강: {analysis.status.reason || "엔진 준비 중…"}</span>}
           </label>
           <label style={lab}>초(파랑) 상차림
             <select aria-label="초(파랑) 상차림" style={{ ...selStyle, color: COL.c }} value={choSetup} onChange={(e) => setChoSetup(e.target.value)}>
@@ -320,6 +346,17 @@ export default function Janggi() {
             </select>
           </label>
         </div>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12 }}>
+          <label style={{ ...btn, fontSize: 13, cursor: networkBusy ? "wait" : "pointer" }}>
+            신경망 넣기
+            <input aria-label="신경망 넣기" type="file" accept=".nnue" disabled={networkBusy} style={{ display: "none" }}
+              onChange={(e) => { const file = e.target.files[0]; e.target.value = ""; if (file) void updateNetwork(file); }} />
+          </label>
+          <button style={{ ...btn, fontSize: 13 }} disabled={networkBusy} onClick={() => updateNetwork(null)}>신경망 지우기</button>
+          <a href="https://fairy-stockfish.github.io/nnue/" target="_blank" rel="noreferrer" style={{ color: COL.c }}>신경망 받는 곳</a>
+          {networkBusy && <span>신경망 적용 중…</span>}
+        </div>
+        {networkError && <div role="alert" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>{networkError}</div>}
         <p style={{ fontSize: 13, color: "#65584a", marginTop: 12, lineHeight: 1.6 }}>
           설정을 바꾼 뒤 새 게임을 누르면 적용돼요. 상차림은 각 편이 자기 쪽에서 바라본 왼쪽부터 읽어요. 파랑(초)이 먼저 둡니다. 빅장과 점수 판정은 없고 외통수로 승부가 납니다.
         </p>
