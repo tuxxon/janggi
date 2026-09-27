@@ -272,3 +272,35 @@ describe("engine recovery and NNUE", () => {
     expect(service.status.nnue).toBe("off");
   });
 });
+
+describe("cached evaluations from the record", () => {
+  it("skips past plies that already have a stored evaluation and searches the rest in order", async () => {
+    const { service, engine } = setup();
+    const known = { cp: 12, win: 51.1, depth: 17 };
+    service.sync("g", [position(0, "c", { known }), position(1, "h", { known }), position(2), position(3)]);
+    await service.ready;
+    expect(engine.positions).toEqual(["position fen fen-2"]);
+    expect(service.status.pending).toBe(2);
+    engine.finish(); await tick();
+    expect(engine.positions).toEqual(["position fen fen-2", "position fen fen-3"]);
+  });
+  it("still analyses the current ply even when cached (candidates and best move are not stored)", async () => {
+    const { service, engine } = setup();
+    const known = { cp: 12, win: 51.1, depth: 17 };
+    service.sync("g", [position(0, "c", { known }), position(1, "h", { known, max: true })]);
+    await service.ready;
+    expect(engine.positions).toEqual(["position fen fen-1"]);
+    expect(engine.searches).toEqual(["go movetime 1000"]);
+    const best = service.bestMove(1);
+    engine.finish(-30, "b10c8"); await tick();
+    await expect(best).resolves.toEqual([1, 20]);
+  });
+  it("a max engine turn after a long restored game is searched first, not after re-analysing history", async () => {
+    const { service, engine } = setup();
+    const known = { cp: 0, win: 50, depth: 15 };
+    const history = Array.from({ length: 40 }, (_, ply) => position(ply, ply % 2 ? "h" : "c", { known }));
+    service.sync("g", [...history, position(40, "c", { max: true })]);
+    await service.ready;
+    expect(engine.positions).toEqual(["position fen fen-40"]);
+  });
+});

@@ -107,3 +107,48 @@ describe("pure export/import helpers", () => {
     expect(() => storage.importRecords("{bad")).toThrow("JSON");
   });
 });
+
+describe("storage for review (M3)", () => {
+  const ID2 = "2026-09-28T15-00-00-000";
+  function twoGames() {
+    const fake = new FakeStorage(), store = storeFor(fake);
+    const old = { ...play(play(store.loadLatest().state, [54, 45]), [27, 36]), result: null };
+    store.save(old);
+    const live = { ...storage.createStore({ storage: fake, now: () => new Date("2026-09-28T15:00:00.000Z") }).newGame() };
+    store.save(live);
+    return { fake, store, old, live };
+  }
+  it("lists games newest-saved first with a summary read from each record", () => {
+    const { store } = twoGames();
+    expect(store.list()).toEqual([
+      { id: ID2, createdAt: "2026-09-28T15:00:00.000Z", controllers: { c: "human", h: "engine" }, level: 3, moves: 0, result: null, corrupted: false },
+      { id: ID, createdAt: DATE, controllers: { c: "human", h: "engine" }, level: 3, moves: 2, result: null, corrupted: false },
+    ]);
+  });
+  it("marks an unreadable record in the list instead of throwing", () => {
+    const { fake, store } = twoGames();
+    fake.setItem(`janggi.game.${ID}`, "{not json");
+    expect(store.list()[1]).toMatchObject({ id: ID, corrupted: true });
+  });
+  it("loads one record by id and rejects ids that are not record ids", () => {
+    const { store } = twoGames();
+    expect(store.load(ID)).toMatchObject({ id: ID, moves: ["a4a5", "a7a6"] });
+    expect(() => store.load("../../etc")).toThrow();
+    expect(() => store.load("2026-01-01T00-00-00-000")).toThrow();
+  });
+  it("saving a reviewed game's analysis does not make it the latest game", () => {
+    const { fake, store, old } = twoGames();
+    const analysed = { ...old, analysis: { engine: "e", evals: [{ ply: 0, cp: 0, win: 50, depth: 10 }, null, null] } };
+    expect(store.save(analysed, { touch: false })).toEqual({ ok: true, error: null });
+    expect(JSON.parse(fake.getItem("janggi.index")).map((e) => e.id)).toEqual([ID2, ID]);
+    expect(storeFor(fake).loadLatest().state.id).toBe(ID2);
+    expect(store.load(ID).analysis.evals[0]).toEqual({ ply: 0, cp: 0, win: 50, depth: 10 });
+  });
+  it("adds imported records after the live game and exports every readable record", () => {
+    const { fake, store } = twoGames();
+    const imported = { ...record({ id: "2026-01-01T00-00-00-000", moves: ["a4a5"] }) };
+    store.put(imported);
+    expect(JSON.parse(fake.getItem("janggi.index")).map((e) => e.id)).toEqual([ID2, "2026-01-01T00-00-00-000", ID]);
+    expect(store.records().map((r) => r.id)).toEqual([ID2, "2026-01-01T00-00-00-000", ID]);
+  });
+});

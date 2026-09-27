@@ -51,11 +51,15 @@ export function createStore({ storage = () => globalThis.localStorage, now = () 
     reserved.add(id);
     return { ...newGame(options), id, createdAt };
   }
-  function save(state) {
+  // touch:false = 복기 중인 판의 분석만 저장한다. 목록 순서(=가장 최근 판)를 바꾸지 않는다.
+  function save(state, { touch = true } = {}) {
     try {
-      const record = toRecord(state), index = readIndex();
+      const record = toRecord(state), index = readIndex(), entry = { id: record.id, createdAt: record.createdAt };
       backend().setItem(PREFIX + record.id, JSON.stringify(record));
-      backend().setItem(INDEX, JSON.stringify([{ id: record.id, createdAt: record.createdAt }, ...index.filter((entry) => entry.id !== record.id)]));
+      const next = touch ? [entry, ...index.filter((e) => e.id !== record.id)]
+        : index.some((e) => e.id === record.id) ? index.map((e) => (e.id === record.id ? { ...e, ...entry } : e))
+        : [...index.slice(0, 1), entry, ...index.slice(1)];
+      backend().setItem(INDEX, JSON.stringify(next));
       error = null;
       return { ok: true, error: null };
     } catch {
@@ -88,5 +92,39 @@ export function createStore({ storage = () => globalThis.localStorage, now = () 
     const state = fresh(options);
     return { state, error, corrupted };
   }
-  return { newGame: fresh, save, loadLatest };
+  function readRecord(entry) {
+    const record = JSON.parse(backend().getItem(PREFIX + entry.id));
+    if (!record || record.id !== entry.id || !Array.isArray(record.moves)) throw new Error("기보를 읽을 수 없어요.");
+    return record;
+  }
+  // 복기 목록: 수순을 재생하지 않고 기록의 필드만 읽는다. 못 읽는 기록은 손상됨으로 표시한다.
+  function list() {
+    let index;
+    try { index = readIndex(); } catch { return []; }
+    return index.map((entry) => {
+      try {
+        if (entry.status === "손상됨") throw new Error(entry.error);
+        const r = readRecord(entry);
+        return { id: r.id, createdAt: r.createdAt, controllers: r.controllers, level: r.level, moves: r.moves.length, result: r.result ?? null, corrupted: false };
+      } catch {
+        return { id: entry.id, createdAt: entry.createdAt, controllers: null, level: null, moves: null, result: null, corrupted: true };
+      }
+    });
+  }
+  function load(id) {
+    if (!validId(id)) throw new Error("기보 id가 올바르지 않아요.");
+    const entry = readIndex().find((e) => e.id === id);
+    if (!entry) throw new Error("기보를 찾을 수 없어요.");
+    return readRecord(entry);
+  }
+  // 가져온 기록은 진행 중인 판(목록 맨 앞) 바로 뒤에 넣는다. 가져오기 검증은 importRecords가 한다.
+  function put(record) {
+    const index = readIndex(), entry = { id: record.id, createdAt: record.createdAt };
+    backend().setItem(PREFIX + record.id, JSON.stringify(record));
+    backend().setItem(INDEX, JSON.stringify([...index.slice(0, 1), entry, ...index.slice(1).filter((e) => e.id !== record.id)]));
+  }
+  function records() {
+    return readIndex().flatMap((entry) => { try { return [readRecord(entry)]; } catch { return []; } });
+  }
+  return { newGame: fresh, save, loadLatest, list, load, put, records };
 }

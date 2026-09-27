@@ -200,7 +200,12 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       if (common < entries.length || id !== gameId) stop();
       for (const entry of entries.slice(common)) settle(entry, null);
       // Preserve completed/in-flight max work when that ply becomes history.
-      entries = [...entries.slice(0, common), ...positions.slice(common).map((p) => ({ ...p, result: null, waiting: [] }))];
+      // 기보에 저장된 평가(known, 초 기준)가 있는 지난 국면은 다시 탐색하지 않는다. 현재 국면은 후보 수·최강 수가 필요해서 항상 탐색한다.
+      const last = positions.length - 1;
+      const cached = (p) => p.known && p.ply !== last && !p.max
+        ? { gameId: id, fen: p.fen, ply: p.ply, ...(p.known.cp !== undefined ? { cp: p.known.cp } : { mate: p.known.mate }),
+          win: p.known.win, depth: p.known.depth, candidates: [], best: null, cached: true } : null;
+      entries = [...entries.slice(0, common), ...positions.slice(common).map((p) => ({ ...p, result: cached(p), waiting: [] }))];
       gameId = id;
       publish(); pump();
     },

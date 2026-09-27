@@ -28,13 +28,19 @@ export function useAnalysis(game) {
     serviceRef.current = service;
     return () => { alive = false; service.dispose(); serviceRef.current = null; };
   }, []);
+  // 판별 캐시: 복기 판과 진행 중인 판을 오가도 계산해 둔 평가를 잃지 않는다.
+  const cachesRef = useRef(new Map());
+  const baseFor = (g) => (cacheRef.current?.id === g.id ? cacheRef.current : cachesRef.current.get(g.id) ?? null);
   useEffect(() => {
-    cacheRef.current = syncAnalysisCache(cacheRef.current, game);
+    if (cacheRef.current) cachesRef.current.set(cacheRef.current.id, cacheRef.current);
+    cacheRef.current = syncAnalysisCache(baseFor(game), game);
     setCache(cacheRef.current);
-    serviceRef.current.sync(game.id, analysisPositions(game));
+    const evals = cacheRef.current.analysis?.evals;
+    serviceRef.current.sync(game.id, analysisPositions(game).map((p) => evals?.[p.ply] ? { ...p, known: evals[p.ply] } : p));
   }, [game]);
   // Render immediately against the new game, even before the synchronization effect runs.
-  const view = syncAnalysisCache(cache, game);
+  const view = syncAnalysisCache(cache.id === game.id ? cache : cachesRef.current.get(game.id) ?? null, game);
   const ply = game.moves.length;
-  return { serviceRef, status, cache: view.analysis, current: view.results[ply], evaluation: view.analysis?.evals[ply] };
+  return { serviceRef, status, cacheId: view.id, cache: view.analysis, results: view.results, evals: view.analysis?.evals,
+    current: view.results[ply], evaluation: view.analysis?.evals[ply] };
 }
