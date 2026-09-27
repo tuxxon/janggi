@@ -47,7 +47,7 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
  ├─ React 앱 ── src/game.js (상태 기계, 순수 함수) ── src/engine.js (원본 규칙·탐색)
  │     │
  │     ├─ src/analysis/ ── Fairy-Stockfish WASM (pthread, 자체 워커)
- │     │                    └─ NNUE: Google Drive에서 직접 받기 → Cache Storage
+ │     │                    └─ NNUE: 사용자가 "신경망 넣기" → Cache Storage (없으면 기본 평가)
  │     └─ src/storage.js ── localStorage (기보) + JSON 내보내기/가져오기
  └─ coi-serviceworker.js ── COOP/COEP를 붙여 SharedArrayBuffer를 연다
 ```
@@ -186,7 +186,7 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
   - **dev 서버 편의**: `~/.janggi/`에 파일이 있으면 dev 서버에서만 같은 출처로 자동으로 쓴다. 빌드 산출물에서는 뺀다.
   - 만든 사람에게 재배포 허락을 받으면 "사이트에 같이 올리기"로 바꾼다.
 - **규칙 차이**: `janggicasual`은 반복 국면을 무승부로, 연속 장군을 금지로 본다. 원본에는 이 규칙이 없다. FEN만 넘기므로 합법 수가 달라지지는 않는다. 다만 같은 수를 되풀이하는 국면에서는 승률이 50% 쪽으로 보일 수 있다.
-- **아직 브라우저에서는 확인하지 않은 것**: GitHub Pages는 헤더를 설정할 수 없다(touchizen.com 응답에 COOP/COEP 없음). 그래서 `coi-serviceworker`로 교차 출처 격리를 켠다. 첫 방문에는 한 번 새로고침된다. 그 상태에서 Drive fetch(CORS 모드)가 통하는지는 구현할 때 Playwright로 확인한다.
+- **교차 출처 격리**: GitHub Pages는 헤더를 설정할 수 없다(touchizen.com 응답에 COOP/COEP 없음). 그래서 `coi-serviceworker`로 켠다. 첫 방문에는 한 번 새로고침된다. 헤더 없는 `vite preview`에서 `crossOriginIsolated === true`와 WASM 분석을 Playwright로 실측했다(마일스톤 0).
 
 ### 로딩 (`src/analysis/`)
 
