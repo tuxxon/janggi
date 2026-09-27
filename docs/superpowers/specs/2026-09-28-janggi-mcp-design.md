@@ -189,8 +189,10 @@ ChatGPT ─cloudflared 터널─▶ /mcp ─▶ ┘   ├─ Analyzer ──UCI�
 
 1. `fairy-stockfish`가 PATH에 없으면 `brew install fairy-stockfish`를 안내한다. 설치 자체는 사용자가 한다.
 2. NNUE 파일을 `~/.janggi/janggi-9991472750de.nnue`로 받는다.
-   - 배포처가 Google Drive라 자동 다운로드가 되는지는 **구현 첫 단계에서 확인**한다. 안 되면 README에 수동 절차를 적는다.
-   - 받은 파일은 SHA-256 해시로 검사한다(파일명의 해시와 대조).
+   - 크기는 11,261,920바이트(약 11MB)다.
+   - 배포처는 Google Drive다(`https://drive.google.com/u/0/uc?id=1dAEzbK1rOm8UGm_-CLdDEgeopFDcAtQP&export=download`).
+   - 2026-09-28에 HEAD 요청을 보내보니 확인 페이지 없이 `200 attachment`로 응답했다. 그래서 curl로 받을 수 있을 것으로 본다. 실제로 받는 것은 구현 첫 단계에서 확인한다.
+   - 받은 파일은 크기와 SHA-256 해시로 검사한다(파일명의 해시와 대조).
 
 ## 8. 복기
 
