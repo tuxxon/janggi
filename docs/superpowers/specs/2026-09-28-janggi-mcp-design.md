@@ -1,6 +1,6 @@
 # 장기 — 웹앱(Pages) + 승률 분석 + 기보 복기, 그리고 GCF MCP 대국 설계
 
-날짜: 2026-09-28 · 개정 2 (로컬 서버 설계를 Pages + GCF 2단계로 교체)
+날짜: 2026-09-28 · 개정 2.1 (신경망 배달: 기본 평가 + 사용자가 넣기)
 
 ## 0. 결정 기록
 
@@ -171,9 +171,20 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
   - `janggicasual` 규칙이 들어 있다.
   - `NNUE evaluation using /janggi-9991472750de.nnue enabled`가 나오고, 신경망을 끄면 평가가 달라진다(cp −1 vs 83).
   - 1스레드 800ms에서 depth 17, 초당 39만 국면(네이티브의 약 60%).
-- **신경망**: `https://drive.usercontent.google.com/download?id=1dAEzbK1rOm8UGm_-CLdDEgeopFDcAtQP&export=download`
-  - 리다이렉트가 없는 최종 주소이고, `access-control-allow-origin: *`를 준다. 브라우저가 직접 받을 수 있어서 **우리가 재배포하지 않는다.**
-  - 크기는 11,261,920바이트, SHA-256은 `9991472750de…`로 시작한다.
+- **신경망 배달 (개정 2.1, 사용자 결정)**
+  - Google Drive는 **브라우저 교차 출처 요청을 403으로 막는다.**
+    - curl HEAD에 Origin만 붙이면 `access-control-allow-origin: *`를 준다.
+    - 그런데 브라우저 헤더(`Sec-Fetch-*`와 Chrome UA)를 붙이면 403 HTML이 오고 CORS 헤더가 없다. Playwright에서도 `No 'Access-Control-Allow-Origin'`으로 실측했다.
+    - 그래서 "Drive에서 직접 받기"는 폐기한다.
+  - 라이선스가 불명확한 파일(2025년판, CC0 아님)을 **우리가 재배포하지 않는다.** 그래서 배포본에는 신경망이 없다.
+  - **기본은 기본 평가(classical)다.** 화면에 "기본 평가(약함)"를 명시한다.
+  - **"신경망 넣기"**
+    - 사용자가 받아 둔 `.nnue` 파일을 고른다. 받는 곳 안내 링크는 `fairy-stockfish.github.io/nnue/`다.
+    - 크기(11,261,920바이트)와 SHA-256(`9991472750de…`)을 검사한다.
+    - 통과하면 Cache Storage에 저장하고, 엔진에 즉시 적용한다(`FS.writeFile`과 `EvalFile`).
+    - 다음 방문부터는 캐시에서 자동으로 쓴다. "신경망 지우기"로 캐시를 비울 수 있다.
+  - **dev 서버 편의**: `~/.janggi/`에 파일이 있으면 dev 서버에서만 같은 출처로 자동으로 쓴다. 빌드 산출물에서는 뺀다.
+  - 만든 사람에게 재배포 허락을 받으면 "사이트에 같이 올리기"로 바꾼다.
 - **규칙 차이**: `janggicasual`은 반복 국면을 무승부로, 연속 장군을 금지로 본다. 원본에는 이 규칙이 없다. FEN만 넘기므로 합법 수가 달라지지는 않는다. 다만 같은 수를 되풀이하는 국면에서는 승률이 50% 쪽으로 보일 수 있다.
 - **아직 브라우저에서는 확인하지 않은 것**: GitHub Pages는 헤더를 설정할 수 없다(touchizen.com 응답에 COOP/COEP 없음). 그래서 `coi-serviceworker`로 교차 출처 격리를 켠다. 첫 방문에는 한 번 새로고침된다. 그 상태에서 Drive fetch(CORS 모드)가 통하는지는 구현할 때 Playwright로 확인한다.
 
@@ -182,11 +193,9 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
 - `crossOriginIsolated`가 false면 분석을 끄고 "이 브라우저에서는 승률 분석을 쓸 수 없어요(교차 출처 격리 안 됨)"를 보여준다.
 - 엔진은 `public/fsf/stockfish.js`를 로드해서 띄운다. 설정은 `UCI_Variant=janggicasual`, `Threads=1`, `MultiPV=5`.
 - **신경망**
-  - Cache Storage에 있으면 그걸 쓰고, 없으면 Drive에서 받아서 크기와 SHA-256을 검사한 뒤 캐시에 넣는다.
-  - 엔진 가상 파일시스템에 쓰고 `EvalFile`로 지정한다.
-  - 엔진 출력에 `NNUE evaluation using … enabled`가 나오는지로 적용 여부를 판정한다.
-  - 받기에 실패하거나 검사에 실패하면 기본 평가로 분석하고, 화면에 "NNUE 없음(약한 평가)"를 **명시적으로** 붙인다.
-- 받는 동안에는 진행률을 보여준다(11MB).
+  - 신경망 출처는 이 순서로 찾는다: Cache Storage(사용자가 넣은 파일) → dev 전용 경로 → 없음(기본 평가).
+  - 적용 여부는 엔진 출력에 `NNUE evaluation using … enabled`가 나오는지로 판정한다.
+  - "신경망 넣기"에서 검사에 실패하면 이유를 보여주고, 캐시에 넣지 않는다.
 
 ### 대기열
 
@@ -240,7 +249,7 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
   - 저장소 전체를 GPL-3.0으로 한다.
   - 배포본에 `fsf/Copying.txt`를 포함한다.
   - 화면 하단에 "승률 분석: Fairy-Stockfish (GPL-3.0) · 소스"와 링크(`github.com/fairy-stockfish/fairy-stockfish.wasm`, 이 앱 저장소)를 둔다.
-- 신경망은 배포본에 넣지 않는다. 브라우저가 Drive에서 받는다.
+- 신경망은 배포본에 넣지 않는다(재배포하지 않음). 사용자가 "신경망 넣기"로 직접 넣는다.
 
 ## 11. 테스트 (TDD)
 
@@ -272,7 +281,7 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
 
 **Playwright** (로컬, `vite build` + `vite preview`)
 - 서비스워커가 격리를 켰는지(`crossOriginIsolated === true`)
-- 실제 Drive 신경망으로 NNUE 적용 표시와 승률 막대가 뜨는지
+- 기본 평가 상태 표시, 그리고 "신경망 넣기"(`setInputFiles`로 로컬 `.nnue`)를 하면 NNUE 적용 표시로 바뀌는지. 새로고침 뒤 캐시에서 유지되는지. 잘못된 파일은 거부하는지
 - 클릭으로 수를 두고 엔진이 응수하는지, 무르기
 - 새로고침 뒤 판이 복원되는지
 - 복기 이동, 그래프, 내보내기/가져오기
