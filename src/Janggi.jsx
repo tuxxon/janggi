@@ -433,6 +433,12 @@ export default function Janggi() {
         <p style={{ fontSize: 13, color: "#65584a", marginTop: 12, lineHeight: 1.6 }}>
           설정을 바꾼 뒤 새 게임을 누르면 적용돼요. 상차림은 각 편이 자기 쪽에서 바라본 왼쪽부터 읽어요. 파랑(초)이 먼저 둡니다. 빅장과 점수 판정은 없고 외통수로 승부가 납니다.
         </p>
+        <p data-testid="license" style={{ fontSize: 12, color: "#65584a", lineHeight: 1.6 }}>
+          승률 분석·최강: Fairy-Stockfish (GPL-3.0) ·{" "}
+          <a href="https://github.com/fairy-stockfish/fairy-stockfish.wasm" target="_blank" rel="noreferrer" style={{ color: COL.c }}>엔진 소스</a> ·{" "}
+          <a href={import.meta.env.BASE_URL + "fsf/Copying.txt"} target="_blank" rel="noreferrer" style={{ color: COL.c }}>라이선스</a> · 이 앱도 GPL-3.0 ·{" "}
+          <a href="https://github.com/tuxxon/janggi" target="_blank" rel="noreferrer" style={{ color: COL.c }}>앱 소스</a>
+        </p>
       </div>
     </div>
   );

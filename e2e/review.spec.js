@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 const OLD = "2026-09-27T10-00-00-000", LIVE = "2026-09-28T10-00-00-000";
 const rec = (id, createdAt, extra) => ({ v: 1, id, createdAt, setups: { c: "마상마상", h: "마상마상" },
@@ -60,6 +60,10 @@ test("지난 판을 열어 버튼·방향키·수순·그래프로 이동하고,
   await page.mouse.click(box.x + box.width - 2, box.y + box.height / 2);
   await expect(status(page)).toHaveText("복기 중 · 3/3수");
   await page.screenshot({ path: "test-results/m3-review.png", fullPage: true });
+  await page.setViewportSize({ width: 360, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/m3-review-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
   expect(await boardFen(page)).toBe(liveFen);
@@ -107,4 +111,16 @@ test("복기하는 동안 엔진끼리 두는 대국은 멈추고, 돌아오면 
   expect(await moves()).toBe(paused);
   await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
   await expect.poll(moves, { timeout: 15_000 }).toBeGreaterThan(paused);
+});
+
+test("GPL 표기의 라이선스 원문과 엔진 파일이 배포본에 들어 있다", async ({ page, request }) => {
+  await seed(page, [live]);
+  await expect(page.getByTestId("license")).toContainText("Fairy-Stockfish (GPL-3.0)");
+  const res = await request.get("/janggi/fsf/Copying.txt");
+  expect(res.ok()).toBe(true);
+  expect(await res.text()).toContain("GNU GENERAL PUBLIC LICENSE");
+  // 신경망은 재배포하지 않는다: 빌드 산출물 어디에도 .nnue 가 없어야 한다(preview 는 없는 경로에 index.html 을 200 으로 준다).
+  const files = readdirSync("dist", { recursive: true }).map(String);
+  expect(files.filter((f) => f.endsWith(".nnue") || f.startsWith("dev-nnue"))).toEqual([]);
+  expect(files).toContain("fsf/stockfish.wasm");
 });
