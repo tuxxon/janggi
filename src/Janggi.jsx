@@ -1,10 +1,12 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { SETUPS, inCheck, kingIdx } from "./engine.js";
+import { inCheck, kingIdx } from "./engine.js";
 import { play as applyMove, undo as undoMove, canUndo, legalMoves, setControllers as switchControllers } from "./game.js";
 import { createStore, exportRecords, importRecords, SAVE_ERROR } from "./storage.js";
 import { replay, toRecord } from "./record.js";
 import { reviewRows } from "./review.js";
 import { GameList, ReviewPanel } from "./Review.jsx";
+import { SettingsPanel } from "./Settings.jsx";
+import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, whoApplied } from "./seats.js";
 import { toFen, moveToUci } from "./notation.js";
 import { moveDelta, grade, moverWin } from "./winrate.js";
 import { useAnalysis } from "./analysis/useAnalysis.js";
@@ -68,9 +70,8 @@ export default function Janggi() {
     return { store, ...store.loadLatest() };
   });
   const [g, setG] = useState(session.state);
-  const [controllers, setControllers] = useState(g.controllers);
-  const [choSetup, setChoSetup] = useState(g.setups.c);
-  const [hanSetup, setHanSetup] = useState(g.setups.h);
+  // 자리(위/아래)별 설정: 두는 이는 즉시, 나라·상차림은 새 게임부터. 난이도도 새 게임부터.
+  const [seats, setSeats] = useState(() => seatsOf(g));
   const [level, setLevel] = useState(g.level);
   const [saveError, setSaveError] = useState(session.error);
   const [corrupted, setCorrupted] = useState(session.corrupted);
@@ -94,9 +95,9 @@ export default function Janggi() {
 
   // 판에 그릴 국면: 진행 중인 판, 또는 복기 중인 판의 k수째.
   const rpos = review && review.positions[review.k];
-  const view = review ? { b: rpos.b, last: rpos.last, caps: rpos.caps, turn: rpos.turn, controllers: review.record.controllers, over: null } : g;
+  const view = review ? { b: rpos.b, last: rpos.last, caps: rpos.caps, turn: rpos.turn, controllers: review.record.controllers, bottom: review.state.bottom, over: null } : g;
   const posState = review ? { b: view.b, turn: view.turn, over: null } : g;
-  const flip = view.controllers.h === "human" && view.controllers.c !== "human";
+  const flip = bottomOf(view) === "h"; // 판 방향은 아래쪽 나라를 따른다(선수는 항상 초)
   const xy = (i) => {
     let r = (i / 9) | 0, c = i % 9;
     if (flip) { r = 9 - r; c = 8 - c; }
@@ -271,16 +272,18 @@ export default function Janggi() {
     catch (error) { setListError(`${SAVE_ERROR} (${error.message})`); } // 저장소가 가득 찬 경우 등: 명시적으로 알린다
     refreshList();
   }
-  // 사람/엔진은 고르는 즉시 지금 판에 적용한다(사람이면 그 편은 기다린다). 난이도·상차림은 새 게임부터.
-  function changeController(side, value) {
-    const next = { ...controllers, [side]: value };
-    setControllers(next);
+  // 두는 이(사람/엔진)는 고르는 즉시 지금 판에서 그 자리에 앉은 나라에 적용한다(사람이면 그 편은 기다린다).
+  function changeWho(seat, who) {
+    setSeats((s) => ({ ...s, [seat]: { ...s[seat], who } }));
     setSel(null); setDrag(null);
-    setG((prev) => switchControllers(prev, next));
+    setG((prev) => switchControllers(prev, whoApplied(prev, seat, who)));
   }
+  // 나라(연동)·상차림은 다음 판 설정만 바꾼다.
+  const changeNation = (seat, nation) => setSeats((s) => chooseNation(s, seat, nation));
+  const changeSetup = (seat, setup) => setSeats((s) => ({ ...s, [seat]: { ...s[seat], setup } }));
   function restart() {
     setSel(null); setDrag(null); setCorrupted(null);
-    setG(session.store.newGame({ controllers, level, setups: { c: choSetup, h: hanSetup } }));
+    setG(session.store.newGame({ ...nextGame(seats), level }));
   }
 
   const oneHuman = Object.values(g.controllers).filter((c) => c === "human").length === 1;
@@ -311,12 +314,12 @@ export default function Janggi() {
   );
 
   const btn = { padding: "10px 8px", borderRadius: 8, background: "#3a2c20", color: "#f8eed7", border: "none", fontSize: 15, cursor: "pointer" };
-  const selStyle = { padding: "9px 6px", borderRadius: 8, border: "1.5px solid #4e3118", background: "#e2dccf", color: "#261d15", width: "100%", fontSize: 14 };
-  const lab = { display: "grid", gap: 4, fontSize: 12, color: "#65584a" };
 
   return (
     <div style={{ minHeight: "100vh", background: "#cfc8bb", color: "#261d15", fontFamily: "serif" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto", padding: "18px 14px 28px" }}>
+      {/* 넓은 화면: 판(왼쪽) + 설정·복기 패널(오른쪽). 좁은 화면: 패널이 판 아래로 내려간다. */}
+      <div style={{ maxWidth: 940, margin: "0 auto", padding: "18px 14px 28px", display: "flex", flexWrap: "wrap", gap: "12px 24px", alignItems: "flex-start", justifyContent: "center" }}>
+      <main style={{ flex: "1 1 520px", maxWidth: 560, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <h1 style={{ fontSize: 32, fontWeight: 900, margin: 0, letterSpacing: "0.05em" }}>장기</h1>
           <div data-testid="status" style={{ fontSize: 16, color: !review && (g.over || engineError || status.includes("장군")) ? COL.h : "#261d15", fontWeight: !review && g.over ? 700 : 400 }}>{status}</div>
@@ -397,7 +400,7 @@ export default function Janggi() {
           </svg>
         </div>
         <Tray side={flip ? "h" : "c"} />
-        {review ? <ReviewPanel rows={rows} k={review.k} n={review.record.moves.length} setK={setK} evals={analysis.evals} onExit={exitReview} /> : <>
+        {!review && <>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 10 }}>
           <button style={{ ...btn, opacity: canUndo(g) ? 1 : 0.4 }} disabled={!canUndo(g)} onClick={undo}>무르기</button>
           <button style={{ ...btn, opacity: myTurn && !inCheck(g.b, g.turn) ? 1 : 0.4 }} disabled={!myTurn || inCheck(g.b, g.turn)} onClick={pass}>한 수 쉬기</button>
@@ -405,33 +408,13 @@ export default function Janggi() {
         </div>
         <button style={{ ...btn, width: "100%", marginTop: 8, background: showList ? "#5a4636" : btn.background }} aria-expanded={showList} onClick={toggleList}>기보</button>
         {showList && <GameList items={listItems} liveId={g.id} onOpen={openReview} onExport={exportOne} onExportAll={exportAll} onImport={importFile} error={listError} />}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, marginTop: 10 }}>
-          {["c", "h"].map((side) => <label key={side} style={lab}>{NAME[side]}
-            <select aria-label={NAME[side]} style={selStyle} value={controllers[side]} onChange={(e) => changeController(side, e.target.value)}>
-              <option value="human">사람</option>
-              <option value="engine">엔진</option>
-            </select>
-          </label>)}
-          <label style={lab}>난이도
-            <select aria-label="난이도" style={selStyle} value={level} onChange={(e) => setLevel(e.target.value === "max" ? "max" : +e.target.value)}>
-              <option value={2}>쉬움</option>
-              <option value={3}>보통</option>
-              <option value={4}>어려움</option>
-              <option value="max" disabled={analysis.status.state !== "ready"}>최강</option>
-            </select>
-            {analysis.status.state !== "ready" && <span>최강: {analysis.status.reason || "엔진 준비 중…"}</span>}
-          </label>
-          <label style={lab}>초(파랑) 상차림
-            <select aria-label="초(파랑) 상차림" style={{ ...selStyle, color: COL.c }} value={choSetup} onChange={(e) => setChoSetup(e.target.value)}>
-              {Object.keys(SETUPS).map((k) => <option key={k}>{k}</option>)}
-            </select>
-          </label>
-          <label style={lab}>한(빨강) 상차림
-            <select aria-label="한(빨강) 상차림" style={{ ...selStyle, color: COL.h }} value={hanSetup} onChange={(e) => setHanSetup(e.target.value)}>
-              {Object.keys(SETUPS).map((k) => <option key={k}>{k}</option>)}
-            </select>
-          </label>
-        </div>
+        </>}
+      </main>
+      <aside style={{ flex: "1 1 300px", maxWidth: 560, minWidth: 0 }}>
+        {review ? <ReviewPanel rows={rows} k={review.k} n={review.record.moves.length} setK={setK} evals={analysis.evals} onExit={exitReview} /> : <>
+        <SettingsPanel seats={seats} nowBottom={bottomOf(g)} pending={pendingOf(seats, level, g)} level={level}
+          maxReason={analysis.status.state !== "ready" ? analysis.status.reason || "엔진 준비 중…" : null}
+          onNation={changeNation} onWho={changeWho} onSetup={changeSetup} onLevel={setLevel} />
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12 }}>
           <label style={{ ...btn, fontSize: 13, cursor: networkBusy ? "wait" : "pointer" }}>
             신경망 넣기
@@ -445,7 +428,7 @@ export default function Janggi() {
         {networkError && <div role="alert" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>{networkError}</div>}
         </>}
         <p style={{ fontSize: 13, color: "#65584a", marginTop: 12, lineHeight: 1.6 }}>
-          초·한의 사람/엔진은 고르는 즉시 바뀌어요. 난이도와 상차림은 새 게임을 누르면 적용돼요. 상차림은 각 편이 자기 쪽에서 바라본 왼쪽부터 읽어요. 파랑(초)이 먼저 둡니다. 빅장과 점수 판정은 없고 외통수로 승부가 납니다.
+          상차림은 각 편이 자기 쪽에서 바라본 왼쪽부터 읽어요. 빅장과 점수 판정은 없고 외통수로 승부가 납니다.
         </p>
         <p data-testid="license" style={{ fontSize: 12, color: "#65584a", lineHeight: 1.6 }}>
           승률 분석·최강: Fairy-Stockfish (GPL-3.0) ·{" "}
@@ -454,6 +437,7 @@ export default function Janggi() {
           <a href={`https://github.com/tuxxon/janggi/tree/${__APP_COMMIT__}`} target="_blank" rel="noreferrer" style={{ color: COL.c, whiteSpace: "nowrap" }}>앱 소스</a> ·{" "}
           <a href={import.meta.env.BASE_URL + "licenses/THIRD_PARTY_NOTICES.txt"} target="_blank" rel="noreferrer" style={{ color: COL.c, whiteSpace: "nowrap" }}>오픈소스 고지</a>
         </p>
+      </aside>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { SETUPS } from "./engine.js";
 import { newGame, play } from "./game.js";
+import { bottomOf } from "./seats.js";
 import { moveToUci, uciToMove } from "./notation.js";
 
 export const validId = (id) => typeof id === "string" && /^[0-9T-]+(-[0-9]+)?$/.test(id);
@@ -13,6 +14,7 @@ function validate(record) {
     if (typeof record.setups?.[side] !== "string" || !Object.hasOwn(SETUPS, record.setups[side])) bad("상차림");
     if (!["human", "engine"].includes(record.controllers?.[side])) bad("컨트롤러");
   }
+  if (record.bottom !== undefined && !["c", "h"].includes(record.bottom)) bad("판 방향");
   if (![2, 3, 4, "max"].includes(record.level)) bad("난이도");
   if (!Array.isArray(record.moves)) bad("수순");
   if (record.result !== null && (!record.result || !["c", "h"].includes(record.result.winner) || record.result.reason !== "외통수")) bad("결과");
@@ -34,6 +36,7 @@ export function toRecord(state) {
   const record = { v: 1, id: state.id, createdAt: state.createdAt, setups: { ...state.setups },
     controllers: { ...state.controllers }, level: state.level, moves: [...state.moves],
     result: state.result ? { ...state.result } : null };
+  if (state.bottom) record.bottom = state.bottom;
   validate(record);
   const analysis = analysisCopy(state.analysis);
   if (analysis) record.analysis = analysis;
@@ -45,7 +48,8 @@ const position = (state) => ({ b: [...state.b], turn: state.turn, last: state.la
 
 export function replay(record) {
   validate(record);
-  let state = { ...newGame(record), id: record.id, createdAt: record.createdAt };
+  // 방향이 없는 옛 기보는 예전 규칙으로 방향을 정해 둔다(이후 저장부터 기보에 남는다).
+  let state = { ...newGame({ ...record, bottom: bottomOf(record) }), id: record.id, createdAt: record.createdAt };
   const positions = [position(state)];
   for (const [index, uci] of record.moves.entries()) {
     try {

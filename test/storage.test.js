@@ -5,7 +5,7 @@ import * as storage from "../src/storage.js";
 const ID = "2026-09-28T14-03-12-345", DATE = "2026-09-28T14:03:12.345Z";
 const FAILURE = "기보 저장 실패 — 내보내기로 백업하세요";
 const record = (extra = {}) => ({ v: 1, id: ID, createdAt: DATE, setups: { c: "마상마상", h: "마상마상" },
-  controllers: { c: "human", h: "engine" }, level: 3, moves: [], result: null, ...extra });
+  controllers: { c: "human", h: "engine" }, level: 3, bottom: "c", moves: [], result: null, ...extra });
 class FakeStorage {
   values = new Map();
   failRead = false;

@@ -12,13 +12,14 @@ afterEach(() => vi.restoreAllMocks());
 describe("record v1", () => {
   it("roundtrips max difficulty without coercing it to a numeric level", () => {
     const saved = record({ level: "max" });
-    expect(records.toRecord(records.replay(saved).state)).toEqual(saved);
+    // 방향이 없는 옛 기록은 예전 규칙(초 사람·한 엔진 → 초가 아래)으로 방향을 얻는다.
+    expect(records.toRecord(records.replay(saved).state)).toEqual({ ...saved, bottom: "c" });
     expect(() => records.replay(record({ level: "5" }))).toThrow("난이도");
   });
   it("serializes only canonical v1 fields, leaving metadata creation to storage", () => {
     const state = play(initial(), [54, 45]);
     expect(records.toRecord(state)).toEqual({ v: 1, ...meta, controllers: { c: "human", h: "engine" }, level: 3,
-      setups: { c: "마상상마", h: "마상상마" }, moves: ["a4a5"], result: null });
+      setups: { c: "마상상마", h: "마상상마" }, bottom: "c", moves: ["a4a5"], result: null });
     const saved = records.toRecord(state);
     saved.moves.push("pass"); saved.controllers.c = "engine";
     expect(state.moves).toEqual(["a4a5"]);
@@ -112,5 +113,22 @@ describe("import validation (review LOW)", () => {
     const { state } = records.replay({ ...rec, controllers: { c: "human", h: "engine", x: "human" }, setups: { c: "마상마상", h: "마상마상", z: 1 } });
     expect(state.controllers).toEqual({ c: "human", h: "engine" });
     expect(state.setups).toEqual({ c: "마상마상", h: "마상마상" });
+  });
+});
+
+describe("board orientation in records (user request 2026-09-28)", () => {
+  const rec = { v: 1, id: "2026-09-28T14-03-12-345", createdAt: "2026-09-28T14:03:12.345Z",
+    setups: { c: "마상마상", h: "마상마상" }, controllers: { c: "engine", h: "human" }, level: 3, moves: ["a4a5"], result: null };
+  it("round-trips the bottom nation", () => {
+    const { state } = records.replay({ ...rec, bottom: "h" });
+    expect(state.bottom).toBe("h");
+    expect(records.toRecord(state).bottom).toBe("h");
+  });
+  it("gives old records (no bottom) the orientation of the old rule", () => {
+    expect(records.replay(rec).state.bottom).toBe("h");
+    expect(records.replay({ ...rec, controllers: { c: "human", h: "engine" } }).state.bottom).toBe("c");
+  });
+  it("rejects an unknown bottom value", () => {
+    expect(() => records.replay({ ...rec, bottom: "x" })).toThrow("판 방향");
   });
 });

@@ -63,7 +63,7 @@ const latestRecord = (page) => page.evaluate(() => {
 
 test("편별 컨트롤러 설정, 사람끼리 대국, 새로고침 복원과 무르기", async ({ page }) => {
   await openGame(page);
-  const cho = page.getByLabel("초(파랑)", { exact: true }), han = page.getByLabel("한(빨강)", { exact: true });
+  const cho = page.getByLabel("아래 두는 이", { exact: true }), han = page.getByLabel("위 두는 이", { exact: true });
   await expect(cho).toHaveValue("human");
   await expect(han).toHaveValue("engine");
   await han.selectOption("human");
@@ -88,7 +88,7 @@ test("편별 컨트롤러 설정, 사람끼리 대국, 새로고침 복원과 �
 
 test("엔진끼리 새 게임을 시작하면 양쪽이 스스로 둔다", async ({ page }) => {
   await openGame(page);
-  await page.getByLabel("초(파랑)", { exact: true }).selectOption("engine");
+  await page.getByLabel("아래 두는 이", { exact: true }).selectOption("engine");
   await page.getByLabel("난이도", { exact: true }).selectOption("2");
   await page.getByRole("button", { name: "새 게임" }).click();
   await expect(page.getByText("엔진이 생각하는 중…", { exact: true })).toBeVisible();
@@ -96,8 +96,8 @@ test("엔진끼리 새 게임을 시작하면 양쪽이 스스로 둔다", async
   await expect(page.getByRole("button", { name: "무르기" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "한 수 쉬기" })).toBeDisabled();
   // 진행 중인 엔진 타이머를 새 판이 취소해야 한다.
-  await page.getByLabel("초(파랑)", { exact: true }).selectOption("human");
-  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human");
+  await page.getByLabel("아래 두는 이", { exact: true }).selectOption("human");
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
   await page.getByRole("button", { name: "새 게임" }).click();
   await page.waitForTimeout(900);
   expect((await latestRecord(page)).moves).toEqual([]);
@@ -115,17 +115,6 @@ test("엔진 응수 대기 중 무르기는 타이머를 취소한다", async ({
   await expect(page.getByText("무르기 했어요.", { exact: true })).toBeVisible();
 });
 
-test("한만 사람이면 판을 뒤집고 한의 기물을 조작한다", async ({ page }) => {
-  await openGame(page);
-  await page.getByLabel("초(파랑)", { exact: true }).selectOption("engine");
-  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human");
-  await page.getByLabel("난이도", { exact: true }).selectOption("2");
-  await page.getByRole("button", { name: "새 게임" }).click();
-  await expect(page.getByText("내 차례예요 · 한(빨강)", { exact: true })).toBeVisible();
-  // 뒤집힌 화면 아래 오른쪽은 한의 a7 병이다.
-  await clickSq(page, 6, 8); await clickSq(page, 5, 8);
-  await expect.poll(async () => (await latestRecord(page))?.moves[1]).toBe("a7a6");
-});
 
 test("저장이 실패해도 대국을 계속하고 백업 안내를 표시한다", async ({ page }) => {
   await page.addInitScript(() => {
@@ -137,7 +126,7 @@ test("저장이 실패해도 대국을 계속하고 백업 안내를 표시한�
   });
   await openGame(page);
   await expect(page.getByRole("alert").filter({ hasText: "기보 저장 실패 — 내보내기로 백업하세요" })).toBeVisible();
-  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human");
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
   await page.getByRole("button", { name: "새 게임" }).click();
   await clickSq(page, 6, 0); await clickSq(page, 5, 0);
   await expect(page.getByText("한(빨강) 차례예요.", { exact: true })).toBeVisible();
@@ -176,7 +165,7 @@ test("최강은 엔진 차례에 합법 수를 두고 그 탐색을 기보 분�
 
 test("후보 수 보기는 선택한 기물의 도착 칸에 승률을 붙이고 선택 해제 시 지운다", async ({ page }) => {
   await openGame(page);
-  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human");
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
   await page.getByRole("button", { name: "새 게임" }).click();
   await expect(page.getByLabel("후보 수 보기")).not.toBeChecked();
   await page.getByLabel("후보 수 보기").check();
@@ -230,14 +219,14 @@ test("잘못된 신경망 파일은 이유를 표시하고 캐시에 넣지 않�
 test("대국 중에 한을 사람으로 바꾸면 엔진이 대신 두지 않고, 엔진으로 되돌리면 그 자리에서 둔다 (사용자 요청)", async ({ page }) => {
   await openGame(page);
   await page.getByRole("button", { name: "새 게임" }).click();           // 기본: 초 사람 · 한 엔진
-  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human"); // 새 게임은 누르지 않는다
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human"); // 새 게임은 누르지 않는다
   await clickSq(page, 6, 0); await clickSq(page, 5, 0);                   // 초 a4a5
   await expect(page.getByTestId("status")).toHaveText("한(빨강) 차례예요.");
   await page.waitForTimeout(1500);
   expect(await latestRecord(page)).toMatchObject({ moves: ["a4a5"], controllers: { c: "human", h: "human" } });
   await clickSq(page, 3, 0); await clickSq(page, 4, 0);                   // 사람이 된 한이 직접 a7a6
   await expect.poll(async () => (await latestRecord(page)).moves).toEqual(["a4a5", "a7a6"]);
-  await page.getByLabel("초(파랑)", { exact: true }).selectOption("engine"); // 초를 엔진으로 → 초 차례라 바로 둔다
+  await page.getByLabel("아래 두는 이", { exact: true }).selectOption("engine"); // 초를 엔진으로 → 초 차례라 바로 둔다
   await expect.poll(async () => (await latestRecord(page)).moves.length, { timeout: 10_000 }).toBe(3);
   await expect(page.getByTestId("status")).toHaveText("내 차례예요 · 한(빨강)");
 });
@@ -248,8 +237,45 @@ test("엔진이 생각하는 중에 그 편을 사람으로 바꾸면 엔진의 
   await page.clock.install({ time: new Date("2026-09-28T00:00:00Z") });
   await page.clock.pauseAt(new Date("2026-09-28T00:01:00Z"));
   await clickSq(page, 6, 0); await clickSq(page, 5, 0);                   // 한(엔진)의 420ms 타이머가 걸린다
-  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human");
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
   await page.clock.runFor(1000);
   expect((await latestRecord(page)).moves).toEqual(["a4a5"]);
   await expect(page.getByTestId("status")).toHaveText("한(빨강) 차례예요.");
+});
+
+test("설정은 넓은 화면에서 판 오른쪽, 좁은 화면에서 판 아래에 있다 (사용자 요청)", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openGame(page);
+  const board = await page.locator("svg[data-fen]").boundingBox(), panel = await page.getByTestId("settings").boundingBox();
+  expect(panel.x).toBeGreaterThanOrEqual(board.x + board.width);
+  expect(panel.y).toBeLessThan(board.y + board.height);
+  await page.screenshot({ path: "test-results/layout-wide.png", fullPage: true });
+  await page.setViewportSize({ width: 360, height: 800 });
+  const board2 = await page.locator("svg[data-fen]").boundingBox(), panel2 = await page.getByTestId("settings").boundingBox();
+  expect(panel2.y).toBeGreaterThanOrEqual(board2.y + board2.height);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/layout-narrow.png", fullPage: true });
+});
+
+test("위·아래 나라는 연동되고 새 게임부터 적용되며, 한이 아래여도 초가 먼저 둔다 (사용자 요청)", async ({ page }) => {
+  await openGame(page);
+  await page.getByRole("button", { name: "새 게임" }).click();                   // 기본: 위 한(엔진) · 아래 초(사람)
+  await page.getByLabel("아래 나라", { exact: true }).selectOption("h");
+  await expect(page.getByLabel("위 나라", { exact: true })).toHaveValue("c");     // 연동
+  await expect(page.getByTestId("pending")).toContainText("나라");                // 지금 판은 그대로, 새 게임부터
+  expect((await latestRecord(page)).bottom).toBe("c");
+  await page.getByLabel("난이도", { exact: true }).selectOption("2");
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await expect(page.getByTestId("pending")).toHaveCount(0);
+  // 선수는 초(위, 엔진): 스스로 한 수 두고, 아래 한(사람) 차례가 된다
+  await expect(page.getByTestId("status")).toHaveText("내 차례예요 · 한(빨강)", { timeout: 10_000 });
+  const rec = await latestRecord(page);
+  expect(rec).toMatchObject({ bottom: "h", controllers: { c: "engine", h: "human" } });
+  expect(rec.moves).toHaveLength(1);
+  // 판이 뒤집혔다: 화면 아래 오른쪽(6,8)이 한의 a7 병
+  await clickSq(page, 6, 8); await clickSq(page, 5, 8);
+  await expect.poll(async () => (await latestRecord(page)).moves[1]).toBe("a7a6");
+  await page.reload();
+  await expect(page.getByLabel("아래 나라", { exact: true })).toHaveValue("h");
+  expect((await latestRecord(page)).bottom).toBe("h");
 });

@@ -164,3 +164,11 @@ describe("switching controllers mid-game (user request 2026-09-28)", () => {
     expect(game.canUndo(game.setControllers(s, { c: "human", h: "engine" }))).toBe(true);
   });
 });
+
+describe("board orientation is part of the game (user request 2026-09-28)", () => {
+  it("defaults to 초 at the bottom and keeps an explicit bottom nation", () => {
+    expect(game.newGame(options).bottom).toBe("c");
+    expect(game.newGame({ ...options, bottom: "h" }).bottom).toBe("h");
+    expect(game.newGame({ ...options, bottom: "h" }).turn).toBe("c"); // 선수는 항상 초
+  });
+});

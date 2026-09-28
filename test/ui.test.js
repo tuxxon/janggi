@@ -14,11 +14,15 @@ const fake = (data = {}) => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("M1 UI rendering", () => {
-  it("renders separate per-side controller selects", () => {
+  it("renders per-seat nation, who-plays and setup selects (user request 2026-09-28)", () => {
     vi.stubGlobal("localStorage", fake());
     const html = render();
-    expect(html).toMatch(/초\(파랑\)<select[^>]*><option value="human" selected="">사람<\/option><option value="engine">엔진/);
-    expect(html).toMatch(/한\(빨강\)<select[^>]*><option value="human">사람<\/option><option value="engine" selected="">엔진/);
+    expect(html).toMatch(/aria-label="위 나라"[^>]*><option value="c">[^<]*<\/option><option value="h" selected="">/);
+    expect(html).toMatch(/aria-label="아래 나라"[^>]*><option value="c" selected="">/);
+    expect(html).toMatch(/aria-label="위 두는 이"[^>]*><option value="human">사람<\/option><option value="engine" selected="">엔진/);
+    expect(html).toMatch(/aria-label="아래 두는 이"[^>]*><option value="human" selected="">사람/);
+    expect(html).toContain('aria-label="위 상차림"');
+    expect(html).toContain('aria-label="아래 상차림"');
     expect(html).not.toContain("AI가 둘 편");
   });
 
