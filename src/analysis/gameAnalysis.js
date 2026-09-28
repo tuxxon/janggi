@@ -23,9 +23,10 @@ export function cacheEvaluation(cache, game, result) {
   if (result.gameId !== game.id || analysisPositions(game)[result.ply]?.fen !== result.fen) return cache;
   cache = syncAnalysisCache(cache, game);
   const engine = `fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=${result.nnue === "on" ? "janggi-9991472750de" : "off"} movetime=800 max-movetime=1000`;
-  const compatible = cache.analysis?.engine === engine;
-  const evals = cache.fens.map((_, ply) => compatible ? cache.analysis.evals[ply] ?? null : null);
-  const results = compatible ? [...cache.results] : [];
+  // 다른 엔진 설정(신경망 켜고 끔)으로 만든 평가도 버리지 않는다. 버리면 저장된 평가를 건너뛰는(known) 서비스가
+  // 그 국면을 다시 채우지 않아 그래프·실수 표시가 영구히 빈다(리뷰 HIGH). engine 은 가장 최근 설정을 적는다.
+  const evals = cache.fens.map((_, ply) => cache.analysis?.evals[ply] ?? null);
+  const results = [...cache.results];
   const { ply, cp, mate, win, depth } = result;
   evals[ply] = { ply, ...(cp !== undefined ? { cp } : { mate }), win, depth };
   results[ply] = result;

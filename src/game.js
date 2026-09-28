@@ -6,8 +6,9 @@ const NAME = { c: "초(파랑)", h: "한(빨강)" };
 // 시각·저장·타이머는 화면/저장 계층이 맡는다.
 export function newGame({ controllers = { c: "human", h: "engine" }, level = 3,
   setups = { c: "마상마상", h: "마상마상" } } = {}) {
-  return { b: newBoard(setups.c, setups.h), turn: "c", controllers: { ...controllers }, level,
-    setups: { ...setups }, last: null, caps: { c: [], h: [] }, hist: [], moves: [], over: null, result: null, msg: "" };
+  // c/h 만 복사한다: 가져온 기록의 모르는 키가 상태로 새어 들어오지 않게.
+  return { b: newBoard(setups.c, setups.h), turn: "c", controllers: { c: controllers.c, h: controllers.h }, level,
+    setups: { c: setups.c, h: setups.h }, last: null, caps: { c: [], h: [] }, hist: [], moves: [], over: null, result: null, msg: "" };
 }
 
 // 쉬기는 별도로 검증한다. 원본 legal()은 탐색 중 판을 바꾸므로 복사본을 넘긴다.

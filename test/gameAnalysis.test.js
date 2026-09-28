@@ -63,4 +63,13 @@ describe("game analysis integration", () => {
       expect(service.bestMove).not.toHaveBeenCalled();
     } finally { spy.mockRestore(); }
   });
+  it("keeps evaluations made with another engine setting instead of wiping them (review HIGH)", () => {
+    const g = play(play(initial(), [54, 45]), [27, 36]);
+    const pos = integration.analysisPositions(g);
+    const stored = { engine: "old-classical", evals: [{ ply: 0, cp: 0, win: 50, depth: 10 }, { ply: 1, cp: 20, win: 52, depth: 10 }, null] };
+    let cache = integration.syncAnalysisCache(null, { ...g, analysis: stored });
+    cache = integration.cacheEvaluation(cache, g, { gameId: g.id, fen: pos[2].fen, ply: 2, cp: 30, win: 53, depth: 14, nnue: "on", movetime: 800, candidates: [] });
+    expect(cache.analysis.evals).toEqual([{ ply: 0, cp: 0, win: 50, depth: 10 }, { ply: 1, cp: 20, win: 52, depth: 10 }, { ply: 2, cp: 30, win: 53, depth: 14 }]);
+    expect(cache.analysis.engine).toContain("nnue=janggi-9991472750de");
+  });
 });

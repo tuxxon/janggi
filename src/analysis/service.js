@@ -18,7 +18,9 @@ const deferred = () => {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 };
-const RESPONSE_TIMEOUT = 15000;
+const RESPONSE_TIMEOUT = 15000, NETWORK_TIMEOUT = 20000;
+// 저장된 신경망 불러오기(Cache Storage·dev fetch)가 끝나지 않아도 기본 평가로 시작한다.
+const settleWithin = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
 
 export function createAnalysisService({ createEngine, loadNetwork = async () => null,
   networkName = "janggi-9991472750de.nnue", onResult = () => {}, onStatus = () => {}, onReset = () => {} }) {
@@ -108,14 +110,17 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   function pump() {
     if (!available || disposed || active || configuring) return;
     if (networkChange) { void configure(); return; }
-    const entry = entries.find((e) => !e.result && !e.error);
+    // 최강 엔진 차례는 밀린 지난 국면 분석보다 먼저 탐색한다(엔진이 수십 초 기다리지 않게). 나머지는 순서대로.
+    const open = (e) => !e.result && !e.error;
+    const entry = entries.find((e) => e.max && open(e)) ?? entries.find(open);
     if (!entry && !focus) return;
     const job = entry ? { entry, movetime: entry.max ? 1000 : 800 } : { entry: focus.entry, focus, movetime: 500 };
     active = { ...job, gameId, lines: new Map(), cancelled: false };
     const gen = generation;
     timer = setTimeout(() => { if (gen === generation) void fail(new Error("엔진 탐색 응답 시간이 초과됐어요.")); }, RESPONSE_TIMEOUT);
     try {
-      send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : 5}`);
+      // 최강 수는 MultiPV 1: 후보 5개를 함께 탐색하면 최선수에 쓸 시간이 나뉘어 약해진다(리뷰).
+      send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : job.entry.max ? 1 : 5}`);
       send(`position fen ${job.entry.fen}`);
       send(`go movetime ${job.movetime}${job.focus ? " searchmoves " + job.focus.moves.join(" ") : ""}`);
       publish();
@@ -184,7 +189,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     } catch (error) { if (gen === generation && !disposed) await fail(error); }
   }
   const ready = (async () => {
-    const loaded = await loadNetwork();
+    const loaded = await settleWithin(loadNetwork(), NETWORK_TIMEOUT);
     if (!networkChange) network = loaded;
     if (!disposed) await start();
   })().catch((error) => fail(error));

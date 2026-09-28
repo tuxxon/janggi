@@ -304,3 +304,37 @@ describe("cached evaluations from the record", () => {
     expect(engine.positions).toEqual(["position fen fen-40"]);
   });
 });
+
+describe("review fixes: max priority, max strength, network loading", () => {
+  it("searches the max engine ply before an unanalysed history backlog (review MED)", async () => {
+    const { service, engine } = setup();
+    const history = Array.from({ length: 40 }, (_, ply) => position(ply));
+    service.sync("g", [...history, position(40, "c", { max: true })]);
+    await service.ready;
+    expect(engine.positions).toEqual(["position fen fen-40"]);
+  });
+  it("after a network change the pending max ply is searched before re-analysing history (review MED)", async () => {
+    const { service, engine } = setup();
+    const known = { cp: 0, win: 50, depth: 15 };
+    const history = Array.from({ length: 30 }, (_, ply) => position(ply, ply % 2 ? "h" : "c", { known }));
+    service.sync("g", [...history, position(30, "c", { max: true })]);
+    await service.ready;
+    const applied = service.setNetwork(new Uint8Array([1]), "n.nnue");
+    engine.finish(); await applied; await tick();
+    expect(engine.positions.at(-1)).toBe("position fen fen-30");
+  });
+  it("searches the max move with MultiPV 1 so the best move gets the whole budget", async () => {
+    const { service, engine } = setup();
+    service.sync("g", [position(0, "c", { max: true })]); await service.ready;
+    const go = engine.commands.lastIndexOf("go movetime 1000");
+    expect(engine.commands.slice(0, go).filter((c) => c.startsWith("setoption name MultiPV")).at(-1)).toBe("setoption name MultiPV value 1");
+  });
+  it("does not hang when loading the stored network never settles (review LOW)", async () => {
+    vi.useFakeTimers();
+    const { service, engine } = setup({ loadNetwork: () => new Promise(() => {}) });
+    service.sync("g", [position(0)]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(service.status.state).toBe("ready");
+    expect(engine.positions).toEqual(["position fen fen-0"]);
+  });
+});

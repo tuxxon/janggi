@@ -10,7 +10,7 @@ function validate(record) {
   if (!validId(record.id)) bad("id");
   if (typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt))) bad("생성 시각");
   for (const side of ["c", "h"]) {
-    if (!Object.hasOwn(SETUPS, record.setups?.[side])) bad("상차림");
+    if (typeof record.setups?.[side] !== "string" || !Object.hasOwn(SETUPS, record.setups[side])) bad("상차림");
     if (!["human", "engine"].includes(record.controllers?.[side])) bad("컨트롤러");
   }
   if (![2, 3, 4, "max"].includes(record.level)) bad("난이도");

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openIsolated } from "./helpers.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { NNUE } from "../src/analysis/fsf.js";
@@ -20,11 +21,13 @@ async function clickSq(page, r, c) {
 test("앱이 뜨고, 격리가 켜지고, 기본 평가 승률이 나오고, 모든 수를 분석한다", async ({ page }) => {
   const externalRequests = [];
   page.on("request", (request) => { if (/drive\.(usercontent\.)?google\.com/.test(request.url())) externalRequests.push(request.url()); });
-  await page.goto("/janggi/");
+  // 서버는 격리 헤더를 보내지 않는다(GitHub Pages 와 같은 조건). 격리는 오직 coi-serviceworker 로 켜져야 한다.
+  // (vite preview 가 server.headers 를 물려받아 이 경로를 한 번도 안 탔던 적이 있다 — 2026-09-28)
+  const direct = await page.request.get("/janggi/");
+  expect(direct.headers()["cross-origin-embedder-policy"]).toBeUndefined();
+  expect(direct.headers()["cross-origin-opener-policy"]).toBeUndefined();
+  await openIsolated(page);
   await expect(page.getByRole("heading", { name: "장기" })).toBeVisible();
-
-  // coi-serviceworker 가 한 번 새로고침한 뒤 격리돼야 한다(Pages 와 같은 경로).
-  await expect.poll(() => page.evaluate(() => self.crossOriginIsolated), { timeout: 20_000 }).toBe(true);
 
   // 배포본에는 신경망이 없다. 기본 평가도 모든 국면을 분석한다.
   const bar = page.getByTestId("winbar");
@@ -50,8 +53,7 @@ test("앱이 뜨고, 격리가 켜지고, 기본 평가 승률이 나오고, 모
 });
 
 async function openGame(page) {
-  await page.goto("/janggi/");
-  await expect.poll(() => page.evaluate(() => self.crossOriginIsolated), { timeout: 20_000 }).toBe(true);
+  await openIsolated(page);
   await expect(page.getByRole("heading", { name: "장기" })).toBeVisible();
 }
 const latestRecord = (page) => page.evaluate(() => {
@@ -133,7 +135,7 @@ test("저장이 실패해도 대국을 계속하고 백업 안내를 표시한�
     };
   });
   await openGame(page);
-  await expect(page.getByText("기보 저장 실패 — 내보내기로 백업하세요", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "기보 저장 실패 — 내보내기로 백업하세요" })).toBeVisible();
   await page.getByLabel("한(빨강)", { exact: true }).selectOption("human");
   await page.getByRole("button", { name: "새 게임" }).click();
   await clickSq(page, 6, 0); await clickSq(page, 5, 0);

@@ -101,3 +101,16 @@ describe("record v1", () => {
     expect(saved.analysis.evals[0].cp).toBe(12);
   });
 });
+
+describe("import validation (review LOW)", () => {
+  const rec = { v: 1, id: "2026-09-28T14-03-12-345", createdAt: "2026-09-28T14:03:12.345Z",
+    setups: { c: "마상마상", h: "마상마상" }, controllers: { c: "human", h: "engine" }, level: 3, moves: [], result: null };
+  it("rejects non-string setups (an array coerces to a valid key)", () => {
+    expect(() => records.replay({ ...rec, setups: { c: ["마상마상"], h: "마상마상" } })).toThrow("상차림");
+  });
+  it("drops unknown controller and setup keys", () => {
+    const { state } = records.replay({ ...rec, controllers: { c: "human", h: "engine", x: "human" }, setups: { c: "마상마상", h: "마상마상", z: 1 } });
+    expect(state.controllers).toEqual({ c: "human", h: "engine" });
+    expect(state.setups).toEqual({ c: "마상마상", h: "마상마상" });
+  });
+});

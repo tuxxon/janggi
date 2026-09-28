@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import * as nnue from "../src/analysis/nnue.js";
 import { readFileSync } from "node:fs";
 
-function setup({ dev = false, hit = null, fetcher = vi.fn(), hash = "9991472750de" } = {}) {
+function setup({ dev = false, hit = null, fetcher = vi.fn(), hash = "9991472750deab2ce1723b9d4040577bac9579b0a20457c4c86659fce03439e9" } = {}) {
   const cache = { match: vi.fn(async () => hit), put: vi.fn(), delete: vi.fn() };
   const cacheStorage = { open: vi.fn(async () => cache) };
   const digest = vi.fn(async () => Uint8Array.from(hash.match(/../g), (v) => parseInt(v, 16)));
@@ -14,7 +14,7 @@ const file = (data = bytes(), name = "janggi.nnue") => ({ name, arrayBuffer: asy
 
 describe("user NNUE delivery", () => {
   it("exposes the fixed network identity and a testable store", () => {
-    expect(nnue.NNUE).toEqual({ name: "janggi-9991472750de.nnue", size: 11261920, shaPrefix: "9991472750de" });
+    expect(nnue.NNUE).toEqual({ name: "janggi-9991472750de.nnue", size: 11261920, sha256: "9991472750deab2ce1723b9d4040577bac9579b0a20457c4c86659fce03439e9" });
     expect(nnue.createNetworkStore).toBeTypeOf("function");
   });
   it("defaults to classical in production without any network fetch", async () => {
@@ -49,7 +49,7 @@ describe("user NNUE delivery", () => {
     expect(new Uint8Array(await cache.put.mock.calls[0][1].arrayBuffer()).length).toBe(11261920);
   });
   it("rejects wrong extensions, size and hash without caching bad files", async () => {
-    const { store, cache, digest } = setup({ hash: "000000000000" });
+    const { store, cache, digest } = setup({ hash: "0".repeat(64) });
     await expect(store.add(file(bytes(), "net.txt"))).rejects.toThrow(".nnue");
     await expect(store.add(file(new Uint8Array(12)))).rejects.toThrow("크기");
     expect(digest).not.toHaveBeenCalled();
@@ -62,5 +62,10 @@ describe("user NNUE delivery", () => {
     expect(cache.delete).toHaveBeenCalledOnce();
     await store.clear();
     expect(cache.delete).toHaveBeenCalledTimes(2);
+  });
+  it("rejects a file whose SHA-256 only shares the 12-character prefix (review LOW: pin the full hash)", async () => {
+    const { store, cache } = setup({ hash: "9991472750de" + "0".repeat(52) });
+    await expect(store.add({ name: "janggi-9991472750de.nnue", arrayBuffer: async () => new ArrayBuffer(11261920) })).rejects.toThrow("SHA-256");
+    expect(cache.put).not.toHaveBeenCalled();
   });
 });

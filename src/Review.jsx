@@ -32,7 +32,7 @@ export function GameList({ items, liveId, onOpen, onExport, onExportAll, onImpor
                 : <>초 {WHO[it.controllers.c]} · 한 {WHO[it.controllers.h]} · {LEVEL[it.level]} · {it.moves}수 · {resultText(it.result)}</>}
             </span>
             {!it.corrupted && <button style={small} onClick={() => onOpen(it.id)}>복기</button>}
-            <button style={small} onClick={() => onExport(it.id)}>내보내기</button>
+            {!it.corrupted && <button style={small} onClick={() => onExport(it.id)}>내보내기</button>}
           </li>
         ))}
       </ol>
@@ -61,7 +61,7 @@ export function WinChart({ evals, k, onPick }) {
       <line x1="0" y1={h / 2} x2={W} y2={h / 2} stroke="#65584a" strokeDasharray="4 4" strokeWidth="1" />
       {segs.map((s, i) => <polyline key={i} points={s.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={COL.c} strokeWidth="2.5" />)}
       {pts.length === 1 && <circle cx={pts[0].x} cy={pts[0].y} r="3" fill={COL.c} />}
-      <line x1={xOf(k)} y1="0" x2={xOf(k)} y2={h} stroke="#e3a21a" strokeWidth="2.5" />
+      <line data-testid="chart-cursor" x1={xOf(k)} y1="0" x2={xOf(k)} y2={h} stroke="#e3a21a" strokeWidth="2.5" />
       <text x={PAD + 2} y="12" fontSize="11" fill={COL.c}>초 100%</text>
       <text x={PAD + 2} y={h - 4} fontSize="11" fill={COL.h}>한 100%</text>
     </svg>

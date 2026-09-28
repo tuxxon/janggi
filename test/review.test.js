@@ -42,3 +42,11 @@ describe("result text", () => {
     expect(resultText({ winner: "h", reason: "외통수" })).toBe("한 승 (외통수)");
   });
 });
+
+describe("auto-pass marker (review gap)", () => {
+  it("marks a move after which the same side is to move again", () => {
+    const record = { moves: ["a1a2", "b1b2"] };
+    const positions = [{ turn: "c" }, { turn: "c" }, { turn: "h" }];
+    expect(reviewRows(record, positions, undefined).map((r) => r.autoPassAfter)).toEqual([true, false]);
+  });
+});

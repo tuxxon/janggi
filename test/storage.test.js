@@ -144,11 +144,23 @@ describe("storage for review (M3)", () => {
     expect(storeFor(fake).loadLatest().state.id).toBe(ID2);
     expect(store.load(ID).analysis.evals[0]).toEqual({ ply: 0, cp: 0, win: 50, depth: 10 });
   });
+  it("lists a record with invalid fields as corrupted instead of handing bad data to the UI (review LOW)", () => {
+    const { fake, store } = twoGames();
+    fake.setItem(`janggi.game.${ID}`, JSON.stringify({ ...JSON.parse(fake.getItem(`janggi.game.${ID}`)), controllers: null }));
+    expect(store.list()[1]).toMatchObject({ id: ID, corrupted: true });
+  });
   it("adds imported records after the live game and exports every readable record", () => {
     const { fake, store } = twoGames();
     const imported = { ...record({ id: "2026-01-01T00-00-00-000", moves: ["a4a5"] }) };
     store.put(imported);
     expect(JSON.parse(fake.getItem("janggi.index")).map((e) => e.id)).toEqual([ID2, "2026-01-01T00-00-00-000", ID]);
     expect(store.records().map((r) => r.id)).toEqual([ID2, "2026-01-01T00-00-00-000", ID]);
+  });
+});
+
+describe("import limits (review LOW)", () => {
+  it("rejects records with more than 5000 moves before replaying them", () => {
+    const huge = JSON.stringify(record({ moves: Array(5001).fill("pass") }));
+    expect(() => storage.importRecords(huge, [])).toThrow("수순이 너무 길어요");
   });
 });

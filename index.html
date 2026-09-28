@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>장기</title>
+    <!-- 모든 브라우저에서 COEP require-corp: coi-serviceworker 0.1.7 은 WebKit 에 credentialless 를 주는데,
+         WebKit 은 그 정책에서 엔진의 pthread 워커(stockfish.worker.js)를 막는다(Playwright WebKit 26.6 실측). -->
+    <script>window.coi = { coepCredentialless: () => false };</script>
     <script src="coi-serviceworker.js"></script>
   </head>
   <body style="margin:0">

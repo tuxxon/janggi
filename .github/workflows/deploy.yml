@@ -5,14 +5,14 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
 concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # npm install 스크립트가 도는 단계에는 배포 권한을 주지 않는다
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,12 +22,17 @@ jobs:
       - run: npm ci
       - run: npx vitest run
       - run: npm run build
+      - name: 신경망(.nnue)을 재배포하지 않는다
+        run: test -z "$(find dist -name '*.nnue' -o -name 'dev-nnue')"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

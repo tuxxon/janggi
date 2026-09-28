@@ -21,7 +21,8 @@ export function useAnalysis(game) {
       },
       onReset: () => {
         if (!alive) return;
-        cacheRef.current = { ...syncAnalysisCache(cacheRef.current, latest.current), analysis: undefined, results: [] };
+        // 신경망이 바뀌어도 저장된 평가는 남긴다(다시 분석되면 덮어쓴다). 메모리의 후보 수만 버린다.
+        cacheRef.current = { ...syncAnalysisCache(cacheRef.current, latest.current), results: [] };
         setCache(cacheRef.current);
       },
     });

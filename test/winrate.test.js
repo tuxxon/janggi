@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { winFromScore, choWin, moveDelta, grade, gradeColor } from "../src/winrate.js";
+import { winFromScore, choWin, moveDelta, grade, gradeColor, moverWin } from "../src/winrate.js";
 
 describe("winrate", () => {
   it("maps centipawns with the lichess chess curve", () => {
@@ -28,5 +28,13 @@ describe("winrate", () => {
   it("does not grade forced passes", () => {
     expect(grade(-40, true)).toBeNull();
     expect(grade(-40, false)).toBe("대실수 ??");
+  });
+});
+
+describe("mover's current win % for hint colours (review gap)", () => {
+  it("reads Cho's stored win % from the side to move", () => {
+    expect(moverWin({ win: 70 }, "c")).toBe(70);
+    expect(moverWin({ win: 70 }, "h")).toBe(30);
+    expect(moverWin(undefined, "h")).toBe(50);
   });
 });

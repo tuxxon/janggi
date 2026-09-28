@@ -1,6 +1,6 @@
 # 장기 — 웹앱(Pages) + 승률 분석 + 기보 복기, 그리고 GCF MCP 대국 설계
 
-날짜: 2026-09-28 · 개정 2.3 (난이도 "최강" = Fairy-Stockfish) · 2.2 (두려는 수의 승률 추가) · 2.1 (신경망: 기본 평가 + 사용자가 넣기)
+날짜: 2026-09-28 · 개정 2.4 (리뷰 반영: WebKit 격리, 평가 보존, 최강 우선) · 2.3 (난이도 "최강" = Fairy-Stockfish) · 2.2 (두려는 수의 승률 추가) · 2.1 (신경망: 기본 평가 + 사용자가 넣기)
 
 ## 0. 결정 기록
 
@@ -194,6 +194,19 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
   - 만든 사람에게 재배포 허락을 받으면 "사이트에 같이 올리기"로 바꾼다.
 - **규칙 차이**: `janggicasual`은 반복 국면을 무승부로, 연속 장군을 금지로 본다. 원본에는 이 규칙이 없다. FEN만 넘기므로 합법 수가 달라지지는 않는다. 다만 같은 수를 되풀이하는 국면에서는 승률이 50% 쪽으로 보일 수 있다.
 - **교차 출처 격리**: GitHub Pages는 헤더를 설정할 수 없다(touchizen.com 응답에 COOP/COEP 없음). 그래서 `coi-serviceworker`로 켠다. 첫 방문에는 한 번 새로고침된다. 헤더 없는 `vite preview`에서 `crossOriginIsolated === true`와 WASM 분석을 Playwright로 실측했다(마일스톤 0).
+
+### 격리와 WebKit (리뷰 뒤 실측, 2026-09-28)
+
+- **vite preview는 `server.headers`를 물려받는다.** 그래서 마일스톤 0부터 "헤더 없는 preview로 Pages 조건을 재현했다"는 검증이 실제로는 서비스워커 경로를 한 번도 타지 않았다.
+  - `preview.headers: {}`로 비웠다.
+  - smoke 테스트가 "preview 응답에 COOP/COEP가 없다"를 단언한다.
+- **coi-serviceworker 0.1.7은 WebKit에 `credentialless`를 준다.**
+  - 이 정책에서 WebKit(Playwright WebKit 26.6)은 엔진의 pthread 워커(`stockfish.worker.js`)를 COEP 위반으로 막는다.
+  - 그래서 `index.html`에서 `coepCredentialless: () => false`로 모든 브라우저에 `require-corp`를 쓰게 했다. 앱에는 다른 출처의 하위 리소스가 없다.
+- **coi-serviceworker의 fetch 처리기는 304 응답에서 죽는다.** 원 저장소 master도 같은 코드다.
+  - WebKit은 캐시된 워커 스크립트에 조건부 요청을 보낸다. 그러면 `new Response(body, {status: 304})`가 TypeError를 던져서 워커가 뜨지 않는다.
+  - 수정본을 `vendor/coi-serviceworker.js`에 두고 배포한다(MIT, 수정 표시). 수정 내용: 304는 캐시 없이 다시 받고, 204·205는 본문 없이 만든다.
+  - WebKit e2e 프로젝트(`@webkit`)가 이것을 지킨다. 수정 전에는 4번 중 4번 실패했고, 수정 후에는 3번 중 3번 통과했다.
 
 ### 로딩 (`src/analysis/`)
 

@@ -2,7 +2,7 @@ import { newGame } from "./game.js";
 import { toRecord, replay, validId } from "./record.js";
 
 export const SAVE_ERROR = "기보 저장 실패 — 내보내기로 백업하세요";
-const INDEX = "janggi.index", PREFIX = "janggi.game.";
+const INDEX = "janggi.index", PREFIX = "janggi.game.", MAX_IMPORT_MOVES = 5000;
 
 function unusedId(id, has) {
   if (!has(id)) return id;
@@ -24,6 +24,8 @@ export function importRecords(json, existingIds = []) {
   try { parsed = JSON.parse(json); } catch { throw new Error("기보 JSON을 읽을 수 없어요."); }
   const used = new Set(existingIds);
   return (Array.isArray(parsed) ? parsed : [parsed]).map((record) => {
+    // 재생 비용이 수순 길이의 제곱에 가깝다: 비정상적으로 긴 기록은 재생 전에 거부한다(리뷰).
+    if (Array.isArray(record?.moves) && record.moves.length > MAX_IMPORT_MOVES) throw new Error(`수순이 너무 길어요(최대 ${MAX_IMPORT_MOVES}수).`);
     const checked = toRecord(replay(record).state);
     checked.id = unusedId(checked.id, (id) => used.has(id));
     used.add(checked.id);
@@ -92,9 +94,13 @@ export function createStore({ storage = () => globalThis.localStorage, now = () 
     const state = fresh(options);
     return { state, error, corrupted };
   }
+  // 목록·내보내기에 넘기기 전에 화면이 쓰는 필드의 모양을 확인한다(잘못된 기록 하나가 화면 전체를 죽이지 않게).
+  const WHO = ["human", "engine"], LEVELS = [2, 3, 4, "max"];
   function readRecord(entry) {
     const record = JSON.parse(backend().getItem(PREFIX + entry.id));
-    if (!record || record.id !== entry.id || !Array.isArray(record.moves)) throw new Error("기보를 읽을 수 없어요.");
+    if (!record || record.id !== entry.id || !Array.isArray(record.moves) || typeof record.createdAt !== "string"
+      || !WHO.includes(record.controllers?.c) || !WHO.includes(record.controllers?.h) || !LEVELS.includes(record.level))
+      throw new Error("기보를 읽을 수 없어요.");
     return record;
   }
   // 복기 목록: 수순을 재생하지 않고 기록의 필드만 읽는다. 못 읽는 기록은 손상됨으로 표시한다.

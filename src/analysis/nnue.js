@@ -1,5 +1,5 @@
 // User-owned NNUE delivery; no production download endpoint.
-export const NNUE = { name: "janggi-9991472750de.nnue", size: 11261920, shaPrefix: "9991472750de" };
+export const NNUE = { name: "janggi-9991472750de.nnue", size: 11261920, sha256: "9991472750deab2ce1723b9d4040577bac9579b0a20457c4c86659fce03439e9" };
 const CACHE = "janggi-nnue-v1";
 const hex = (buf) => [...new Uint8Array(buf)].map((x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -11,7 +11,7 @@ export function createNetworkStore({ cacheStorage = globalThis.caches, fetcher =
     const bytes = new Uint8Array(await source.arrayBuffer());
     if (bytes.length !== NNUE.size) throw new Error(`NNUE 크기가 달라요: ${bytes.length}바이트 (필요: ${NNUE.size})`);
     const sha = hex(await digest(bytes));
-    if (!sha.startsWith(NNUE.shaPrefix)) throw new Error(`NNUE SHA-256이 달라요: ${sha.slice(0, 12)} (필요: ${NNUE.shaPrefix})`);
+    if (sha !== NNUE.sha256) throw new Error(`NNUE SHA-256이 달라요: ${sha.slice(0, 12)}… (필요: ${NNUE.sha256.slice(0, 12)}…)`);
     return bytes;
   }
   return {

@@ -1,12 +1,12 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { SETUPS, inCheck, kingIdx } from "./engine.js";
 import { play as applyMove, undo as undoMove, canUndo, legalMoves } from "./game.js";
-import { createStore, exportRecords, importRecords } from "./storage.js";
-import { replay } from "./record.js";
+import { createStore, exportRecords, importRecords, SAVE_ERROR } from "./storage.js";
+import { replay, toRecord } from "./record.js";
 import { reviewRows } from "./review.js";
 import { GameList, ReviewPanel } from "./Review.jsx";
 import { toFen, moveToUci } from "./notation.js";
-import { moveDelta, grade } from "./winrate.js";
+import { moveDelta, grade, moverWin } from "./winrate.js";
 import { useAnalysis } from "./analysis/useAnalysis.js";
 import { engineTurn } from "./analysis/gameAnalysis.js";
 import { HintLabels } from "./analysis/HintLabels.jsx";
@@ -127,7 +127,7 @@ export default function Janggi() {
   // 분석 캐시는 그 캐시의 판에만 저장한다. 복기 판은 목록 순서(가장 최근 판)를 바꾸지 않는다.
   useEffect(() => {
     if (analysis.cacheId === g.id) setSaveError(session.store.save({ ...g, analysis: analysis.cache }).error);
-    else if (review && analysis.cacheId === review.state.id && analysis.cache) session.store.save({ ...review.state, analysis: analysis.cache }, { touch: false });
+    else if (review && analysis.cacheId === review.state.id && analysis.cache) setSaveError(session.store.save({ ...review.state, analysis: analysis.cache }, { touch: false }).error);
   }, [g, review, analysis.cache, analysis.cacheId, session.store]);
 
   const fPly = review ? review.k : g.moves.length;
@@ -228,7 +228,7 @@ export default function Janggi() {
   useEffect(() => {
     if (!reviewing) return;
     const onKey = (e) => {
-      if (e.target.closest?.("input, select, textarea")) return;
+      if (e.target.closest?.("select, textarea, input:not([type=checkbox])")) return; // 체크박스는 화살표를 안 쓴다(리뷰)
       const move = { ArrowLeft: (k) => k - 1, ArrowRight: (k) => k + 1, Home: () => 0, End: () => Infinity }[e.key];
       if (move) { e.preventDefault(); setK(move); }
     };
@@ -237,9 +237,11 @@ export default function Janggi() {
   }, [reviewing]);
   const refreshList = () => setListItems(session.store.list());
   function toggleList() { if (!showList) refreshList(); setShowList(!showList); setListError(null); }
+  // 진행 중인 판은 저장소가 아니라 메모리의 최신 상태가 정본이다(저장이 실패했거나 밀렸을 수 있다).
+  const liveRecord = () => toRecord({ ...g, analysis: analysis.cacheId === g.id ? analysis.cache : g.analysis });
   function openReview(id) {
     try {
-      const record = session.store.load(id);
+      const record = id === g.id ? liveRecord() : session.store.load(id);
       const { positions, state } = replay(record);
       setSel(null); setDrag(null); setFocused(null); setListError(null);
       setReview({ record, positions, state, k: 0 });
@@ -253,18 +255,20 @@ export default function Janggi() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
+  // 저장 실패 알림이 내보내기를 권하므로, 진행 중인 판은 저장소(실패한 곳)가 아니라 메모리에서 내보낸다.
+  const allRecords = () => [liveRecord(), ...session.store.records().filter((r) => r.id !== g.id)];
   function exportOne(id) {
-    try { download(`janggi-${id}.json`, exportRecords(session.store.records(), id)); } catch (error) { setListError(error.message); }
+    try { download(`janggi-${id}.json`, exportRecords(allRecords(), id)); } catch (error) { setListError(error.message); }
   }
   function exportAll() {
-    try { download(`janggi-all-${new Date().toISOString().slice(0, 10)}.json`, exportRecords(session.store.records())); } catch (error) { setListError(error.message); }
+    try { download(`janggi-all-${new Date().toISOString().slice(0, 10)}.json`, exportRecords(allRecords())); } catch (error) { setListError(error.message); }
   }
   async function importFile(file) {
-    try {
-      const checked = importRecords(await file.text(), session.store.list().map((it) => it.id));
-      for (const record of checked) session.store.put(record);
-      setListError(null);
-    } catch (error) { setListError(error.message); }
+    let checked;
+    try { checked = importRecords(await file.text(), session.store.list().map((it) => it.id)); }
+    catch (error) { setListError(error.message); return; }
+    try { for (const record of checked) session.store.put(record); setListError(null); }
+    catch (error) { setListError(`${SAVE_ERROR} (${error.message})`); } // 저장소가 가득 찬 경우 등: 명시적으로 알린다
     refreshList();
   }
   function restart() {
@@ -287,7 +291,7 @@ export default function Janggi() {
   const viewEval = review ? analysis.evals?.[review.k] : analysis.evaluation;
   const candidates = hints ? (review ? analysis.results?.[review.k]?.candidates : analysis.current?.candidates) ?? [] : [];
   const focusCandidates = hints && focused?.game === fGame && focused.ply === fPly && focused.sel === sel ? focused.candidates : [];
-  const turnWin = viewEval ? view.turn === "c" ? viewEval.win : 100 - viewEval.win : 50;
+  const turnWin = moverWin(viewEval, view.turn);
 
   const Tray = ({ side }) => (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3, minHeight: 28, alignItems: "center", padding: "2px 4px" }}>
@@ -312,17 +316,20 @@ export default function Janggi() {
         </div>
         {lastEvaluation && <div data-testid="last-evaluation" style={{ fontSize: 13, marginBottom: 4 }}>{lastEvaluation}</div>}
         <div style={{ fontSize: 13, color: "#65584a" }}>초 {view.controllers.c === "human" ? "사람" : "엔진"} · 한 {view.controllers.h === "human" ? "사람" : "엔진"}. 상차림은 초 {(review ? review.record : g).setups.c}, 한 {(review ? review.record : g).setups.h}</div>
-        {saveError && <div role="alert" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>{saveError}</div>}
+        {saveError && <div role="alert" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>{saveError}{" "}
+          <button style={{ fontSize: 12, padding: "2px 8px", borderRadius: 6, border: `1px solid ${COL.h}`, background: "#f8eed7", color: COL.h, cursor: "pointer" }}
+            onClick={() => exportOne(g.id)}>지금 내보내기</button></div>}
         {corrupted && <div role="status" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>최근 기보 손상됨 — 새 게임을 시작했어요.</div>}
         <WinBar a={viewEval} status={analysis.status} fen={toFen(view.b, view.turn)} />
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
-          <input type="checkbox" checked={hints} onChange={(e) => setHints(e.target.checked)} />후보 수 보기
+          <input type="checkbox" checked={hints} onChange={(e) => { setHints(e.target.checked); if (!e.target.checked && review) setSel(null); }} />후보 수 보기
         </label>
         {hints && <div style={{ fontSize: 12, color: "#65584a", marginTop: 4 }}>
           {view.turn === "c" ? "초" : "한"}가 둘 수 · 두는 쪽 승률
           <ol data-testid="candidates" style={{ display: "flex", flexWrap: "wrap", gap: "4px 20px", paddingLeft: 20, margin: "4px 0" }}>
             {candidates.map((candidate) => <li key={candidate.move}>{candidate.move === "pass" ? "쉬기" : candidate.move} {Math.round(candidate.win)}%</li>)}
           </ol>
+          {!candidates.length && <span>상위 5수는 이 국면을 분석한 뒤에 보여요. 기물을 집으면 그 기물의 수마다 승률이 떠요.</span>}
         </div>}
         <Tray side={flip ? "c" : "h"} />
         <div style={{ borderRadius: 10, overflow: "hidden", boxShadow: "0 10px 30px rgba(40,20,5,.35)" }}>
@@ -435,9 +442,10 @@ export default function Janggi() {
         </p>
         <p data-testid="license" style={{ fontSize: 12, color: "#65584a", lineHeight: 1.6 }}>
           승률 분석·최강: Fairy-Stockfish (GPL-3.0) ·{" "}
-          <a href="https://github.com/fairy-stockfish/fairy-stockfish.wasm" target="_blank" rel="noreferrer" style={{ color: COL.c }}>엔진 소스</a> ·{" "}
-          <a href={import.meta.env.BASE_URL + "fsf/Copying.txt"} target="_blank" rel="noreferrer" style={{ color: COL.c }}>라이선스</a> · 이 앱도 GPL-3.0 ·{" "}
-          <a href="https://github.com/tuxxon/janggi" target="_blank" rel="noreferrer" style={{ color: COL.c }}>앱 소스</a>
+          <a href="https://github.com/fairy-stockfish/fairy-stockfish.wasm/tree/1.1.12" target="_blank" rel="noreferrer" style={{ color: COL.c, whiteSpace: "nowrap" }}>엔진 소스</a> ·{" "}
+          <a href={import.meta.env.BASE_URL + "fsf/Copying.txt"} target="_blank" rel="noreferrer" style={{ color: COL.c, whiteSpace: "nowrap" }}>라이선스</a> · 이 앱도 GPL-3.0 ·{" "}
+          <a href={`https://github.com/tuxxon/janggi/tree/${__APP_COMMIT__}`} target="_blank" rel="noreferrer" style={{ color: COL.c, whiteSpace: "nowrap" }}>앱 소스</a> ·{" "}
+          <a href={import.meta.env.BASE_URL + "licenses/THIRD_PARTY_NOTICES.txt"} target="_blank" rel="noreferrer" style={{ color: COL.c, whiteSpace: "nowrap" }}>오픈소스 고지</a>
         </p>
       </div>
     </div>

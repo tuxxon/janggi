@@ -10,6 +10,9 @@ export function choWin(s, turn) {
   return turn === "c" ? w : 100 - w;
 }
 
+// 저장된 초 기준 평가 → 두는 쪽의 지금 승률(훈수 색의 기준). 평가가 없으면 50.
+export const moverWin = (e, turn) => (e ? (turn === "c" ? e.win : 100 - e.win) : 50);
+
 // 저장된 초 승률 두 개 → 실제로 둔 쪽의 변화(%p).
 export const moveDelta = (before, after, mover) => (after - before) * (mover === "c" ? 1 : -1);
 
