@@ -113,4 +113,4 @@ function bestMove(b,side,depth){
   return best;
 }
 
-export { PV, WIN, SETUPS, on, inPal, other, newBoard, gen, kingIdx, inCheck, make, unmake, legal, evalB, bestMove };
+export { PV, WIN, SETUPS, on, inPal, other, newBoard, gen, kingIdx, inCheck, make, unmake, legal, evalB, order, search, bestMove };

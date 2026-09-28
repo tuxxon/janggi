@@ -1,22 +1,30 @@
 import { newBoard, other, legal, inCheck, make } from "./engine.js";
 import { moveToUci } from "./notation.js";
+import { forbiddenMove } from "./repetition.js";
 
 const NAME = { c: "초(파랑)", h: "한(빨강)" };
 
 // 시각·저장·타이머는 화면/저장 계층이 맡는다.
 export function newGame({ controllers = { c: "human", h: "engine" }, level = 3,
-  setups = { c: "마상마상", h: "마상마상" }, bottom = "c" } = {}) {
+  setups = { c: "마상마상", h: "마상마상" }, bottom = "c", repetition = true } = {}) {
   // c/h 만 복사한다: 가져온 기록의 모르는 키가 상태로 새어 들어오지 않게.
   // bottom: 판 아래쪽 나라(화면 방향). 선수는 방향과 상관없이 항상 초다.
   return { b: newBoard(setups.c, setups.h), turn: "c", controllers: { c: controllers.c, h: controllers.h }, level,
-    setups: { c: setups.c, h: setups.h }, bottom, last: null, caps: { c: [], h: [] }, hist: [], moves: [], over: null, result: null, msg: "" };
+    setups: { c: setups.c, h: setups.h }, bottom, repetition, last: null, caps: { c: [], h: [] }, hist: [], moves: [], over: null, result: null, msg: "" };
 }
 
-// 쉬기는 별도로 검증한다. 원본 legal()은 탐색 중 판을 바꾸므로 복사본을 넘긴다.
-export const legalMoves = (state) => state.over ? [] : legal(state.b.slice(), state.turn);
+// 쉬기는 별도로 검증한다. 원본 legal()은 탐색 중 판을 바꾸므로 복사본을 넘긴다. 반복수로 막힌 수는 뺀다.
+export function legalMoves(state) {
+  if (state.over) return [];
+  const moves = legal(state.b.slice(), state.turn), blocked = forbiddenMove(state);
+  return blocked ? moves.filter(([f, t]) => f !== blocked[0] || t !== blocked[1]) : moves;
+}
 
 export function play(state, move) {
   if (state.over) throw new Error("이미 끝난 대국이에요.");
+  const blocked = forbiddenMove(state);
+  if (blocked && Array.isArray(move) && move[0] === blocked[0] && move[1] === blocked[1])
+    throw new Error("반복수: 같은 수를 세 번째 둘 수 없어요.");
   if (move === "pass") {
     if (inCheck(state.b, state.turn)) throw new Error("장군일 때는 쉴 수 없어요.");
   } else if (!Array.isArray(move) || move.length !== 2 ||
@@ -30,7 +38,9 @@ export function play(state, move) {
     if (cap) caps[other(cap[0])].push(cap);
   }
   let turn = other(state.turn), over = null, result = null, msg = "";
-  const ms = legal(b, turn), chk = inCheck(b, turn);
+  const hist = [...state.hist, state], moves = [...state.moves, moveToUci(move)];
+  // 다음 편의 합법 수도 반복수를 반영한다(막힌 수만 남으면 둘 수 없어 쉰다).
+  const ms = legalMoves({ ...state, b, turn, over: null, hist, moves }), chk = inCheck(b, turn);
   const humans = ["c", "h"].filter((side) => state.controllers[side] === "human");
   if (!ms.length && chk) {
     over = other(turn);
@@ -47,8 +57,7 @@ export function play(state, move) {
       ? turn === humans[0] ? "장군이에요! 궁을 지키세요." : "장군!"
       : `장군! ${NAME[turn]} 궁을 지키세요.`;
   } else if (move === "pass") msg = "한 수 쉬었어요.";
-  return { ...state, b, caps, last, turn, over, result, msg,
-    hist: [...state.hist, state], moves: [...state.moves, moveToUci(move)] };
+  return { ...state, b, caps, last, turn, over, result, msg, hist, moves };
 }
 
 function undoIndex(state) {

@@ -1,12 +1,26 @@
 // Glue between canonical game history, the UCI service and persisted evaluations.
-import { toFen } from "../notation.js";
-import { bestMove } from "../engine.js";
-import { play } from "../game.js";
+import { toFen, moveToUci, sqName } from "../notation.js";
+import { bestMove, inCheck, kingIdx } from "../engine.js";
+import { play, legalMoves } from "../game.js";
+import { forbiddenMove } from "../repetition.js";
+import { bestMoveExcluding } from "../engineMove.js";
 
-export const analysisPositions = (game) => [...game.hist, game].map((state, ply) => ({
-  ply, fen: toFen(state.b, state.turn), turn: state.turn,
-  max: ply === game.moves.length && !game.over && game.level === "max" && game.controllers[game.turn] === "engine",
-}));
+// 반복수로 막힌 수가 있는 국면만 Fairy-Stockfish 루트 수를 제한한다(엔진은 FEN 만 받아 수순을 모른다).
+// 쉬기는 FSF 표기(궁이 제자리로 가는 수)로 넣는다.
+function restriction(state) {
+  if (!forbiddenMove(state)) return undefined;
+  const moves = legalMoves(state).map(moveToUci);
+  if (!inCheck(state.b, state.turn)) { const k = sqName(kingIdx(state.b, state.turn)); moves.push(k + k); }
+  return moves;
+}
+
+// restrictions: 판이 바뀔 때(서비스 동기화)만 계산한다 — 렌더마다 모든 국면의 반복수를 보지 않게.
+export const analysisPositions = (game, { restrictions = false } = {}) => [...game.hist, game].map((state, ply) => {
+  const searchmoves = restrictions ? restriction(state) : undefined;
+  return { ply, fen: toFen(state.b, state.turn), turn: state.turn,
+    max: ply === game.moves.length && !game.over && game.level === "max" && game.controllers[game.turn] === "engine",
+    ...(searchmoves ? { searchmoves } : {}) };
+});
 
 export function syncAnalysisCache(cache, game) {
   const fens = analysisPositions(game).map((p) => p.fen);
@@ -35,7 +49,12 @@ export function cacheEvaluation(cache, game, result) {
 
 // Null means the request was invalidated by undo/new game, never a weaker fallback.
 export async function engineTurn(game, service) {
-  if (game.level !== "max") return play(game, bestMove(game.b.slice(), game.turn, game.level) ?? "pass");
+  if (game.level !== "max") {
+    // 반복수로 막힌 수가 있으면 그 수를 뺀 루트 탐색(원본과 같은 식), 없으면 원본 bestMove 그대로.
+    const blocked = forbiddenMove(game);
+    const move = blocked ? bestMoveExcluding(game.b.slice(), game.turn, game.level, blocked) : bestMove(game.b.slice(), game.turn, game.level);
+    return play(game, move ?? "pass");
+  }
   const move = await service.bestMove(game.moves.length);
   if (move === null) return null;
   try { return play(game, move); }

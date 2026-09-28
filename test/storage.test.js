@@ -25,7 +25,7 @@ describe("storage", () => {
     expect(first).toMatchObject({ id: ID, createdAt: DATE, moves: [] });
     const played = play(play(first, [54, 45]), [27, 36]);
     expect(store.save(played)).toEqual({ ok: true, error: null });
-    expect(JSON.parse(fake.getItem(`janggi.game.${ID}`))).toEqual(record({ moves: ["a4a5", "a7a6"] }));
+    expect(JSON.parse(fake.getItem(`janggi.game.${ID}`))).toEqual(record({ moves: ["a4a5", "a7a6"], repetition: true })); // 새 판은 반복수 규칙을 가진다
     expect(JSON.parse(fake.getItem("janggi.index"))).toEqual([{ id: ID, createdAt: DATE }]);
     expect(storeFor(fake).loadLatest()).toMatchObject({ state: played, error: null, corrupted: null });
     const second = store.newGame({ controllers: { c: "human", h: "human" } });

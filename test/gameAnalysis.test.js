@@ -73,3 +73,35 @@ describe("game analysis integration", () => {
     expect(cache.analysis.engine).toContain("nnue=janggi-9991472750de");
   });
 });
+
+describe("engines obey the repetition rule (user request: Kakao Janggi)", () => {
+  const sq = (s) => ({ a1: 81, a2: 72, a3: 63, a5: 45, e2: 76, f9: 14, i10: 8, i9: 17 })[s];
+  const shuffle = [[81, 72], [8, 17], [72, 81], [17, 8], [81, 72], [8, 17], [72, 81], [17, 8]];
+  it("the original-engine root search skips an excluded move even when it is clearly best", async () => {
+    const { bestMoveExcluding } = await import("../src/engineMove.js");
+    const b = new Array(90).fill(null);
+    b[sq("e2")] = "cK"; b[sq("a1")] = "cR"; b[sq("f9")] = "hK"; b[sq("a5")] = "hR"; // 초 차가 한 차를 공짜로 잡을 수 있다
+    expect(bestMoveExcluding(b.slice(), "c", 2, null)).toEqual([81, 45]);
+    const other = bestMoveExcluding(b.slice(), "c", 2, [81, 45]);
+    expect(other).not.toEqual([81, 45]);
+    expect(original.legal(b.slice(), "c").some(([f, t]) => f === other[0] && t === other[1])).toBe(true);
+  });
+  it("levels 2–4 never play the forbidden third repetition, even if the original search would choose it", async () => {
+    let g = initial({ level: 2, controllers: { c: "engine", h: "human" } });
+    for (const m of shuffle) g = play(g, m);
+    // 원본 bestMove 가 금지된 a1a2 를 고른다고 해도(우연히 안 고르는 것에 기대지 않는다) 규칙을 지켜야 한다.
+    const spy = vi.spyOn(original, "bestMove").mockReturnValue([81, 72]);
+    try {
+      for (let i = 0; i < 3; i++) expect((await integration.engineTurn(g, {})).moves.at(-1)).not.toBe("a1a2");
+    } finally { spy.mockRestore(); }
+  });
+  it("restricts the analysed root moves with searchmoves where a move is forbidden (pass as king-to-self)", () => {
+    let g = initial();
+    for (const m of shuffle) g = play(g, m);
+    const last = integration.analysisPositions(g, { restrictions: true }).at(-1);
+    expect(last.searchmoves).toContain("a1a3");
+    expect(last.searchmoves).toContain("e2e2");
+    expect(last.searchmoves).not.toContain("a1a2");
+    expect(integration.analysisPositions(g, { restrictions: true })[0].searchmoves).toBeUndefined();
+  });
+});

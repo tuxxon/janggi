@@ -7,6 +7,7 @@ import { reviewRows } from "./review.js";
 import { GameList, ReviewPanel } from "./Review.jsx";
 import { SettingsPanel } from "./Settings.jsx";
 import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, whoApplied } from "./seats.js";
+import { forbiddenMove } from "./repetition.js";
 import { toFen, moveToUci } from "./notation.js";
 import { moveDelta, grade, moverWin } from "./winrate.js";
 import { useAnalysis } from "./analysis/useAnalysis.js";
@@ -22,6 +23,7 @@ const glyph = (p) => (typeof GL[p[1]] === "string" ? GL[p[1]] : GL[p[1]][p[0]]);
 const NAME = { c: "초(파랑)", h: "한(빨강)" };
 const COL = { c: "#1b4a8c", h: "#ae2219" };
 const MARK = "#e3a21a";
+const REPETITION_NOTICE = "반복수: 같은 수를 세 번째 둘 수 없어요.";
 const oct = (x, y, r) =>
   Array.from({ length: 8 }, (_, k) => {
     const a = Math.PI / 8 + (k * Math.PI) / 4;
@@ -81,6 +83,7 @@ export default function Janggi() {
   const [moveError, setMoveError] = useState(null);
   const [networkError, setNetworkError] = useState(null);
   const [networkBusy, setNetworkBusy] = useState(false);
+  const [notice, setNotice] = useState(null); // 반복수로 막힌 칸을 눌렀을 때의 안내
   const [showList, setShowList] = useState(false);
   const [listItems, setListItems] = useState([]);
   const [listError, setListError] = useState(null);
@@ -122,6 +125,8 @@ export default function Janggi() {
   }, [g, thinking, serviceRef, reviewing]);
 
   const myTurn = !review && !g.over && g.controllers[g.turn] === "human";
+  const blocked = myTurn ? forbiddenMove(g) : null; // 반복수로 막힌 수(있으면 하나)
+  useEffect(() => { setNotice(null); }, [g, sel]);
   const canSelect = myTurn || (reviewing && hints); // 복기에서는 훈수 모드일 때 기물을 집어 승률만 본다
   const targets = sel !== null && canSelect ? legalMoves(posState).filter((m) => m[0] === sel) : [];
   const checkKing = !view.over && inCheck(view.b, view.turn) ? kingIdx(view.b, view.turn) : -1;
@@ -176,6 +181,7 @@ export default function Janggi() {
     if (!canSelect) return;
     const { x, y } = toSvg(e), i = idxAt(x, y);
     if (i === null) return;
+    if (blocked && sel === blocked[0] && i === blocked[1]) { setNotice(REPETITION_NOTICE); return; }
     const t = targets.find((m) => m[1] === i);
     if (t) { if (!review) play(t, true); return; } // 선택 후 목적지를 탭(복기에서는 두지 않는다)
     const p = view.b[i];
@@ -195,6 +201,7 @@ export default function Janggi() {
     if (!drag) return;
     if (drag.moved) {
       const { x, y } = toSvg(e), j = idxAt(x, y);
+      if (blocked && drag.i === blocked[0] && j === blocked[1]) { setNotice(REPETITION_NOTICE); setDrag(null); return; }
       const t = j === null ? null : movesFrom(drag.i).find((m) => m[1] === j);
       if (t && !review) { play(t, false); return; } // 끌어다 놓기: 이미 손으로 옮겼으니 슬라이드 생략
     } else if (drag.wasSel) setSel(null);        // 선택된 기물을 다시 탭하면 해제
@@ -325,6 +332,7 @@ export default function Janggi() {
           <div data-testid="status" style={{ fontSize: 16, color: !review && (g.over || engineError || status.includes("장군")) ? COL.h : "#261d15", fontWeight: !review && g.over ? 700 : 400 }}>{status}</div>
         </div>
         {lastEvaluation && <div data-testid="last-evaluation" style={{ fontSize: 13, marginBottom: 4 }}>{lastEvaluation}</div>}
+        {notice && <div data-testid="notice" role="status" style={{ fontSize: 13, color: COL.h, marginBottom: 4 }}>{notice}</div>}
         <div style={{ fontSize: 13, color: "#65584a" }}>초 {view.controllers.c === "human" ? "사람" : "엔진"} · 한 {view.controllers.h === "human" ? "사람" : "엔진"}. 상차림은 초 {(review ? review.record : g).setups.c}, 한 {(review ? review.record : g).setups.h}</div>
         {saveError && <div role="alert" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>{saveError}{" "}
           <button style={{ fontSize: 12, padding: "2px 8px", borderRadius: 6, border: `1px solid ${COL.h}`, background: "#f8eed7", color: COL.h, cursor: "pointer" }}
@@ -390,6 +398,16 @@ export default function Janggi() {
                 <circle key={"t" + m[1]} cx={x} cy={y} r="9" fill={MARK} />
               );
             })}
+            {blocked && sel === blocked[0] && (() => {
+              const [x, y] = xy(blocked[1]);
+              return (
+                <g data-testid="repetition-blocked" style={{ pointerEvents: "none" }}>
+                  <title>반복수 금지 — 같은 수를 세 번째 둘 수 없어요</title>
+                  <line x1={x - 9} y1={y - 9} x2={x + 9} y2={y + 9} stroke={COL.h} strokeWidth="4" strokeLinecap="round" />
+                  <line x1={x + 9} y1={y - 9} x2={x - 9} y2={y + 9} stroke={COL.h} strokeWidth="4" strokeLinecap="round" />
+                </g>
+              );
+            })()}
             {drag && drag.moved && view.b[drag.i] && (
               <g style={{ pointerEvents: "none" }}>
                 <Piece p={view.b[drag.i]} x={drag.x} y={drag.y} selected lifted />
@@ -429,6 +447,7 @@ export default function Janggi() {
         </>}
         <p style={{ fontSize: 13, color: "#65584a", marginTop: 12, lineHeight: 1.6 }}>
           상차림은 각 편이 자기 쪽에서 바라본 왼쪽부터 읽어요. 빅장과 점수 판정은 없고 외통수로 승부가 납니다.
+          반복수: 궁·사가 아닌 기물로 같은 수를 세 번째 둘 수 없어요(장군을 받는 중이거나 잡는 수가 끼면 다시 세요).
         </p>
         <p data-testid="license" style={{ fontSize: 12, color: "#65584a", lineHeight: 1.6 }}>
           승률 분석·최강: Fairy-Stockfish (GPL-3.0) ·{" "}

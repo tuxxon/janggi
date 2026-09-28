@@ -37,7 +37,7 @@ export function useAnalysis(game) {
     cacheRef.current = syncAnalysisCache(baseFor(game), game);
     setCache(cacheRef.current);
     const evals = cacheRef.current.analysis?.evals;
-    serviceRef.current.sync(game.id, analysisPositions(game).map((p) => evals?.[p.ply] ? { ...p, known: evals[p.ply] } : p));
+    serviceRef.current.sync(game.id, analysisPositions(game, { restrictions: true }).map((p) => evals?.[p.ply] ? { ...p, known: evals[p.ply] } : p));
   }, [game]);
   // Render immediately against the new game, even before the synchronization effect runs.
   const view = syncAnalysisCache(cache.id === game.id ? cache : cachesRef.current.get(game.id) ?? null, game);

@@ -352,3 +352,14 @@ describe("controller switched to the engine at 'max' (user request 2026-09-28)",
     await expect(best).resolves.toEqual([82, 65]);
   });
 });
+
+describe("repetition-restricted positions (user request: Kakao Janggi)", () => {
+  it("adds searchmoves to position and max searches when the position restricts root moves", async () => {
+    const { service, engine } = setup();
+    service.sync("g", [position(0, "c", { searchmoves: ["a1a3", "e2e2"] })]); await service.ready;
+    expect(engine.searches.at(-1)).toBe("go movetime 800 searchmoves a1a3 e2e2");
+    engine.finish(); await tick();
+    service.sync("g", [position(0, "c", { searchmoves: ["a1a3", "e2e2"], max: true })]); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 1000 searchmoves a1a3 e2e2");
+  });
+});

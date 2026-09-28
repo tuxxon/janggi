@@ -279,3 +279,23 @@ test("위·아래 나라는 연동되고 새 게임부터 적용되며, 한이 �
   await expect(page.getByLabel("아래 나라", { exact: true })).toHaveValue("h");
   expect((await latestRecord(page)).bottom).toBe("h");
 });
+
+test("반복수: 같은 수를 세 번째 두려 하면 그 칸에 ✕가 뜨고 둘 수 없다 (사용자 요청)", async ({ page }) => {
+  await openGame(page);
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");   // 사람끼리
+  await page.getByRole("button", { name: "새 게임" }).click();
+  // 초 차 a1↔a2, 한 차 i10↔i9 를 두 번씩 왕복한다
+  for (const [r1, c1, r2, c2] of [[9, 0, 8, 0], [0, 8, 1, 8], [8, 0, 9, 0], [1, 8, 0, 8], [9, 0, 8, 0], [0, 8, 1, 8], [8, 0, 9, 0], [1, 8, 0, 8]]) {
+    await clickSq(page, r1, c1); await clickSq(page, r2, c2);
+  }
+  await expect.poll(async () => (await latestRecord(page)).moves.length).toBe(8);
+  expect((await latestRecord(page)).repetition).toBe(true);
+  await clickSq(page, 9, 0);                                                    // 초 차를 집는다
+  await expect(page.getByTestId("repetition-blocked")).toHaveCount(1);          // a2 에 ✕
+  await clickSq(page, 8, 0);                                                    // 막힌 칸을 누른다
+  await expect(page.getByTestId("notice")).toContainText("반복수");
+  expect((await latestRecord(page)).moves).toHaveLength(8);
+  await clickSq(page, 7, 0);                                                    // 차는 여전히 선택돼 있다: 다른 수(a1a3)는 된다
+  await expect.poll(async () => (await latestRecord(page)).moves.at(-1)).toBe("a1a3");
+  await expect(page.getByTestId("notice")).toHaveCount(0);
+});

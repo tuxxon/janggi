@@ -19,7 +19,7 @@ describe("record v1", () => {
   it("serializes only canonical v1 fields, leaving metadata creation to storage", () => {
     const state = play(initial(), [54, 45]);
     expect(records.toRecord(state)).toEqual({ v: 1, ...meta, controllers: { c: "human", h: "engine" }, level: 3,
-      setups: { c: "마상상마", h: "마상상마" }, bottom: "c", moves: ["a4a5"], result: null });
+      setups: { c: "마상상마", h: "마상상마" }, bottom: "c", repetition: true, moves: ["a4a5"], result: null });
     const saved = records.toRecord(state);
     saved.moves.push("pass"); saved.controllers.c = "engine";
     expect(state.moves).toEqual(["a4a5"]);
@@ -130,5 +130,22 @@ describe("board orientation in records (user request 2026-09-28)", () => {
   });
   it("rejects an unknown bottom value", () => {
     expect(() => records.replay({ ...rec, bottom: "x" })).toThrow("판 방향");
+  });
+});
+
+describe("repetition rule in records (user request: Kakao Janggi)", () => {
+  const rec = { v: 1, id: "2026-09-28T14-03-12-345", createdAt: "2026-09-28T14:03:12.345Z", bottom: "c",
+    setups: { c: "마상마상", h: "마상마상" }, controllers: { c: "human", h: "human" }, level: 3, result: null,
+    moves: ["a1a2", "i10i9", "a2a1", "i9i10", "a1a2", "i10i9", "a2a1", "i9i10", "a1a2"] };
+  it("replays an old record (no rule flag) with a third repetition unchanged", () => {
+    const { state } = records.replay(rec);
+    expect(state.repetition).toBe(false);
+    expect(records.toRecord(state)).not.toHaveProperty("repetition");
+  });
+  it("rejects that third repetition when the record carries the rule, and round-trips the flag", () => {
+    expect(() => records.replay({ ...rec, repetition: true })).toThrow("9수째");
+    const { state } = records.replay({ ...rec, repetition: true, moves: rec.moves.slice(0, 8) });
+    expect(records.toRecord(state).repetition).toBe(true);
+    expect(() => records.replay({ ...rec, repetition: "yes" })).toThrow("반복수");
   });
 });

@@ -122,7 +122,9 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       // 최강 수는 MultiPV 1: 후보 5개를 함께 탐색하면 최선수에 쓸 시간이 나뉘어 약해진다(리뷰).
       send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : job.entry.max ? 1 : 5}`);
       send(`position fen ${job.entry.fen}`);
-      send(`go movetime ${job.movetime}${job.focus ? " searchmoves " + job.focus.moves.join(" ") : ""}`);
+      // 반복수로 막힌 수가 있는 국면은 루트 수를 제한한다(searchmoves). 초점 분석은 원래 그 기물의 수만 본다.
+      const roots = job.focus ? job.focus.moves : job.entry.searchmoves;
+      send(`go movetime ${job.movetime}${roots ? " searchmoves " + roots.join(" ") : ""}`);
       publish();
     } catch (error) { void fail(error); }
   }
@@ -201,7 +203,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       // max 가 바뀐 국면(대국 중에 그 편을 최강 엔진으로 바꿈)도 새 국면으로 본다: 0.8초 분석 결과를 최강 수로 쓰지 않는다.
       if (id === gameId) while (common < entries.length && common < positions.length &&
         entries[common].fen === positions[common].fen && entries[common].turn === positions[common].turn &&
-        !!entries[common].max === !!positions[common].max) common++;
+        !!entries[common].max === !!positions[common].max &&
+        String(entries[common].searchmoves ?? "") === String(positions[common].searchmoves ?? "")) common++;
       const changed = id !== gameId || common !== entries.length || common !== positions.length;
       if (changed) cancelFocus();
       if (common < entries.length || id !== gameId) stop();

@@ -15,6 +15,7 @@ function validate(record) {
     if (!["human", "engine"].includes(record.controllers?.[side])) bad("컨트롤러");
   }
   if (record.bottom !== undefined && !["c", "h"].includes(record.bottom)) bad("판 방향");
+  if (record.repetition !== undefined && typeof record.repetition !== "boolean") bad("반복수 규칙");
   if (![2, 3, 4, "max"].includes(record.level)) bad("난이도");
   if (!Array.isArray(record.moves)) bad("수순");
   if (record.result !== null && (!record.result || !["c", "h"].includes(record.result.winner) || record.result.reason !== "외통수")) bad("결과");
@@ -37,6 +38,7 @@ export function toRecord(state) {
     controllers: { ...state.controllers }, level: state.level, moves: [...state.moves],
     result: state.result ? { ...state.result } : null };
   if (state.bottom) record.bottom = state.bottom;
+  if (state.repetition) record.repetition = true;
   validate(record);
   const analysis = analysisCopy(state.analysis);
   if (analysis) record.analysis = analysis;
@@ -49,7 +51,8 @@ const position = (state) => ({ b: [...state.b], turn: state.turn, last: state.la
 export function replay(record) {
   validate(record);
   // 방향이 없는 옛 기보는 예전 규칙으로 방향을 정해 둔다(이후 저장부터 기보에 남는다).
-  let state = { ...newGame({ ...record, bottom: bottomOf(record) }), id: record.id, createdAt: record.createdAt };
+  // 반복수 규칙은 그 표시가 있는 기보에만 적용한다(규칙 이전의 판은 두어진 그대로 재생).
+  let state = { ...newGame({ ...record, bottom: bottomOf(record), repetition: record.repetition === true }), id: record.id, createdAt: record.createdAt };
   const positions = [position(state)];
   for (const [index, uci] of record.moves.entries()) {
     try {
