@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { SETUPS, inCheck, kingIdx } from "./engine.js";
-import { play as applyMove, undo as undoMove, canUndo, legalMoves } from "./game.js";
+import { play as applyMove, undo as undoMove, canUndo, legalMoves, setControllers as switchControllers } from "./game.js";
 import { createStore, exportRecords, importRecords, SAVE_ERROR } from "./storage.js";
 import { replay, toRecord } from "./record.js";
 import { reviewRows } from "./review.js";
@@ -271,6 +271,13 @@ export default function Janggi() {
     catch (error) { setListError(`${SAVE_ERROR} (${error.message})`); } // 저장소가 가득 찬 경우 등: 명시적으로 알린다
     refreshList();
   }
+  // 사람/엔진은 고르는 즉시 지금 판에 적용한다(사람이면 그 편은 기다린다). 난이도·상차림은 새 게임부터.
+  function changeController(side, value) {
+    const next = { ...controllers, [side]: value };
+    setControllers(next);
+    setSel(null); setDrag(null);
+    setG((prev) => switchControllers(prev, next));
+  }
   function restart() {
     setSel(null); setDrag(null); setCorrupted(null);
     setG(session.store.newGame({ controllers, level, setups: { c: choSetup, h: hanSetup } }));
@@ -400,7 +407,7 @@ export default function Janggi() {
         {showList && <GameList items={listItems} liveId={g.id} onOpen={openReview} onExport={exportOne} onExportAll={exportAll} onImport={importFile} error={listError} />}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, marginTop: 10 }}>
           {["c", "h"].map((side) => <label key={side} style={lab}>{NAME[side]}
-            <select aria-label={NAME[side]} style={selStyle} value={controllers[side]} onChange={(e) => setControllers({ ...controllers, [side]: e.target.value })}>
+            <select aria-label={NAME[side]} style={selStyle} value={controllers[side]} onChange={(e) => changeController(side, e.target.value)}>
               <option value="human">사람</option>
               <option value="engine">엔진</option>
             </select>
@@ -438,7 +445,7 @@ export default function Janggi() {
         {networkError && <div role="alert" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>{networkError}</div>}
         </>}
         <p style={{ fontSize: 13, color: "#65584a", marginTop: 12, lineHeight: 1.6 }}>
-          설정을 바꾼 뒤 새 게임을 누르면 적용돼요. 상차림은 각 편이 자기 쪽에서 바라본 왼쪽부터 읽어요. 파랑(초)이 먼저 둡니다. 빅장과 점수 판정은 없고 외통수로 승부가 납니다.
+          초·한의 사람/엔진은 고르는 즉시 바뀌어요. 난이도와 상차림은 새 게임을 누르면 적용돼요. 상차림은 각 편이 자기 쪽에서 바라본 왼쪽부터 읽어요. 파랑(초)이 먼저 둡니다. 빅장과 점수 판정은 없고 외통수로 승부가 납니다.
         </p>
         <p data-testid="license" style={{ fontSize: 12, color: "#65584a", lineHeight: 1.6 }}>
           승률 분석·최강: Fairy-Stockfish (GPL-3.0) ·{" "}

@@ -198,8 +198,10 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     get status() { return status; },
     sync(id, positions) {
       let common = 0;
+      // max 가 바뀐 국면(대국 중에 그 편을 최강 엔진으로 바꿈)도 새 국면으로 본다: 0.8초 분석 결과를 최강 수로 쓰지 않는다.
       if (id === gameId) while (common < entries.length && common < positions.length &&
-        entries[common].fen === positions[common].fen && entries[common].turn === positions[common].turn) common++;
+        entries[common].fen === positions[common].fen && entries[common].turn === positions[common].turn &&
+        !!entries[common].max === !!positions[common].max) common++;
       const changed = id !== gameId || common !== entries.length || common !== positions.length;
       if (changed) cancelFocus();
       if (common < entries.length || id !== gameId) stop();

@@ -338,3 +338,17 @@ describe("review fixes: max priority, max strength, network loading", () => {
     expect(engine.positions).toEqual(["position fen fen-0"]);
   });
 });
+
+describe("controller switched to the engine at 'max' (user request 2026-09-28)", () => {
+  it("re-searches the current ply as a real max move instead of reusing its 800 ms analysis", async () => {
+    const { service, engine } = setup();
+    service.sync("g", [position(0)]); await service.ready;
+    engine.finish(10, "a4a5"); await tick();            // 사람 차례였던 국면의 일반 분석(MultiPV 5, 800ms)
+    service.sync("g", [position(0, "c", { max: true })]); // 그 편을 엔진(최강)으로 바꿨다
+    await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 1000");
+    const best = service.bestMove(0);
+    engine.finish(20, "b1c3"); await tick();
+    await expect(best).resolves.toEqual([82, 65]);
+  });
+});

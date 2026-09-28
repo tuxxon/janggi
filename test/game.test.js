@@ -140,3 +140,27 @@ describe("undo", () => {
     expect(game.undo(freeze(mate))).toMatchObject({ over: null, result: null, moves: [], turn: "c" });
   });
 });
+
+describe("switching controllers mid-game (user request 2026-09-28)", () => {
+  it("replaces only the controllers; board, turn and moves stay", () => {
+    const start = game.play(game.newGame(options), [54, 45]); // 초 a4a5 → 한 차례
+    const switched = game.setControllers(start, { c: "human", h: "human", x: "engine" });
+    expect(switched.controllers).toEqual({ c: "human", h: "human" });
+    expect(switched.moves).toEqual(["a4a5"]);
+    expect(switched.turn).toBe("h");
+    expect(switched.b).toEqual(start.b);
+    expect(start.controllers).toEqual({ c: "human", h: "engine" }); // 입력은 바꾸지 않는다
+  });
+  it("undo keeps the controllers chosen now, not the ones stored in history", () => {
+    let s = game.play(game.play(game.newGame(options), [54, 45]), [27, 36]); // 초 a4a5, 한 a7a6 (한=엔진이 둠)
+    s = game.setControllers(s, { c: "human", h: "human" });
+    const back = game.undo(s); // 사람끼리: 한 수만 되돌린다
+    expect(back.moves).toEqual(["a4a5"]);
+    expect(back.controllers).toEqual({ c: "human", h: "human" });
+  });
+  it("can undo only through turns that are human under the current controllers", () => {
+    const s = game.play(game.newGame(options), [54, 45]);
+    expect(game.canUndo(game.setControllers(s, { c: "engine", h: "engine" }))).toBe(false);
+    expect(game.canUndo(game.setControllers(s, { c: "human", h: "engine" }))).toBe(true);
+  });
+});

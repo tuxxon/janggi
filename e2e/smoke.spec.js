@@ -67,7 +67,8 @@ test("편별 컨트롤러 설정, 사람끼리 대국, 새로고침 복원과 �
   await expect(cho).toHaveValue("human");
   await expect(han).toHaveValue("engine");
   await han.selectOption("human");
-  await expect.poll(async () => (await latestRecord(page))?.controllers).toEqual({ c: "human", h: "engine" });
+  // 사람/엔진은 고르는 즉시 지금 판에 반영된다(사용자 요청 2026-09-28). 난이도·상차림만 새 게임부터.
+  await expect.poll(async () => (await latestRecord(page))?.controllers).toEqual({ c: "human", h: "human" });
   await page.getByRole("button", { name: "새 게임" }).click();
   await clickSq(page, 6, 0); await clickSq(page, 5, 0);
   await clickSq(page, 3, 0); await clickSq(page, 4, 0);
@@ -224,4 +225,31 @@ test("잘못된 신경망 파일은 이유를 표시하고 캐시에 넣지 않�
   await page.reload();
   await expect(bar).toHaveAttribute("data-cho-win", /\d/, { timeout: 30_000 });
   await expect(bar).toHaveAttribute("data-nnue", "off");
+});
+
+test("대국 중에 한을 사람으로 바꾸면 엔진이 대신 두지 않고, 엔진으로 되돌리면 그 자리에서 둔다 (사용자 요청)", async ({ page }) => {
+  await openGame(page);
+  await page.getByRole("button", { name: "새 게임" }).click();           // 기본: 초 사람 · 한 엔진
+  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human"); // 새 게임은 누르지 않는다
+  await clickSq(page, 6, 0); await clickSq(page, 5, 0);                   // 초 a4a5
+  await expect(page.getByTestId("status")).toHaveText("한(빨강) 차례예요.");
+  await page.waitForTimeout(1500);
+  expect(await latestRecord(page)).toMatchObject({ moves: ["a4a5"], controllers: { c: "human", h: "human" } });
+  await clickSq(page, 3, 0); await clickSq(page, 4, 0);                   // 사람이 된 한이 직접 a7a6
+  await expect.poll(async () => (await latestRecord(page)).moves).toEqual(["a4a5", "a7a6"]);
+  await page.getByLabel("초(파랑)", { exact: true }).selectOption("engine"); // 초를 엔진으로 → 초 차례라 바로 둔다
+  await expect.poll(async () => (await latestRecord(page)).moves.length, { timeout: 10_000 }).toBe(3);
+  await expect(page.getByTestId("status")).toHaveText("내 차례예요 · 한(빨강)");
+});
+
+test("엔진이 생각하는 중에 그 편을 사람으로 바꾸면 엔진의 수는 버린다", async ({ page }) => {
+  await openGame(page);
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await page.clock.install({ time: new Date("2026-09-28T00:00:00Z") });
+  await page.clock.pauseAt(new Date("2026-09-28T00:01:00Z"));
+  await clickSq(page, 6, 0); await clickSq(page, 5, 0);                   // 한(엔진)의 420ms 타이머가 걸린다
+  await page.getByLabel("한(빨강)", { exact: true }).selectOption("human");
+  await page.clock.runFor(1000);
+  expect((await latestRecord(page)).moves).toEqual(["a4a5"]);
+  await expect(page.getByTestId("status")).toHaveText("한(빨강) 차례예요.");
 });
