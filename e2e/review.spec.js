@@ -241,3 +241,17 @@ test("손상된 목록 항목에는 복기·내보내기를 두지 않고 손상
   await expect(bad).toContainText("손상됨");
   await expect(bad.getByRole("button")).toHaveCount(0);
 });
+
+test("복기 훈수에서도 그 시점에 반복수로 막힌 수는 도착 칸으로 뜨지 않는다 (리뷰 LOW)", async ({ page }) => {
+  const shuffle = rec(OLD, "2026-09-27T10:00:00.000Z", { controllers: { c: "human", h: "human" }, repetition: true, bottom: "c",
+    moves: ["a1a2", "e9e10", "a2a1", "e10e9", "a1a2", "e9e10", "a2a1", "e10e9"] });
+  await seed(page, [live, shuffle]);
+  await page.getByRole("button", { name: "기보" }).click();
+  await page.getByTestId("game-item").nth(1).getByRole("button", { name: "복기" }).click();
+  await page.getByRole("button", { name: "마지막 수" }).click();
+  await page.getByLabel("후보 수 보기").check();
+  await clickSq(page, 9, 0);                                                     // 초 차 a1
+  const dotAt = (r, c) => page.locator(`svg circle[r="9"][cx="${40 + c * 60}"][cy="${40 + r * 60}"]`);
+  await expect(dotAt(7, 0)).toHaveCount(1);                                      // a3 는 갈 수 있었다
+  await expect(dotAt(8, 0)).toHaveCount(0);                                      // a2 는 그 시점에 반복수로 막혀 있었다
+});

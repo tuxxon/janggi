@@ -1,12 +1,12 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { inCheck, kingIdx } from "./engine.js";
-import { play as applyMove, undo as undoMove, canUndo, legalMoves, setControllers as switchControllers } from "./game.js";
+import { play as applyMove, undo as undoMove, canUndo, legalMoves } from "./game.js";
 import { createStore, exportRecords, importRecords, SAVE_ERROR } from "./storage.js";
 import { replay, toRecord } from "./record.js";
 import { reviewRows } from "./review.js";
 import { GameList, ReviewPanel } from "./Review.jsx";
 import { SettingsPanel } from "./Settings.jsx";
-import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, whoApplied } from "./seats.js";
+import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, withWho } from "./seats.js";
 import { forbiddenMove } from "./repetition.js";
 import { toFen, moveToUci } from "./notation.js";
 import { moveDelta, grade, moverWin } from "./winrate.js";
@@ -23,7 +23,7 @@ const glyph = (p) => (typeof GL[p[1]] === "string" ? GL[p[1]] : GL[p[1]][p[0]]);
 const NAME = { c: "초(파랑)", h: "한(빨강)" };
 const COL = { c: "#1b4a8c", h: "#ae2219" };
 const MARK = "#e3a21a";
-const REPETITION_NOTICE = "반복수: 같은 수를 세 번째 둘 수 없어요.";
+const REPETITION_NOTICE = "반복수: 한 기물로 두 칸을 계속 오갈 수 없어요.";
 const oct = (x, y, r) =>
   Array.from({ length: 8 }, (_, k) => {
     const a = Math.PI / 8 + (k * Math.PI) / 4;
@@ -99,7 +99,8 @@ export default function Janggi() {
   // 판에 그릴 국면: 진행 중인 판, 또는 복기 중인 판의 k수째.
   const rpos = review && review.positions[review.k];
   const view = review ? { b: rpos.b, last: rpos.last, caps: rpos.caps, turn: rpos.turn, controllers: review.record.controllers, bottom: review.state.bottom, over: null } : g;
-  const posState = review ? { b: view.b, turn: view.turn, over: null } : g;
+  // 복기 국면의 합법 수: 재생해 둔 그 시점의 게임 상태(수순 포함)를 써서 반복수까지 반영한다.
+  const posState = review ? (review.k < review.state.moves.length ? review.state.hist[review.k] : review.state) : g;
   const flip = bottomOf(view) === "h"; // 판 방향은 아래쪽 나라를 따른다(선수는 항상 초)
   const xy = (i) => {
     let r = (i / 9) | 0, c = i % 9;
@@ -283,7 +284,7 @@ export default function Janggi() {
   function changeWho(seat, who) {
     setSeats((s) => ({ ...s, [seat]: { ...s[seat], who } }));
     setSel(null); setDrag(null);
-    setG((prev) => switchControllers(prev, whoApplied(prev, seat, who)));
+    setG((prev) => withWho(prev, seat, who)); // 끝난 판이면 다음 판 설정만 바뀐다
   }
   // 나라(연동)·상차림은 다음 판 설정만 바꾼다.
   const changeNation = (seat, nation) => setSeats((s) => chooseNation(s, seat, nation));
@@ -326,7 +327,7 @@ export default function Janggi() {
     <div style={{ minHeight: "100vh", background: "#cfc8bb", color: "#261d15", fontFamily: "serif" }}>
       {/* 넓은 화면: 판(왼쪽) + 설정·복기 패널(오른쪽). 좁은 화면: 패널이 판 아래로 내려간다. */}
       <div style={{ maxWidth: 940, margin: "0 auto", padding: "18px 14px 28px", display: "flex", flexWrap: "wrap", gap: "12px 24px", alignItems: "flex-start", justifyContent: "center" }}>
-      <main style={{ flex: "1 1 520px", maxWidth: 560, minWidth: 0 }}>
+      <main style={{ flex: "1 1 560px", maxWidth: 560, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <h1 style={{ fontSize: 32, fontWeight: 900, margin: 0, letterSpacing: "0.05em" }}>장기</h1>
           <div data-testid="status" style={{ fontSize: 16, color: !review && (g.over || engineError || status.includes("장군")) ? COL.h : "#261d15", fontWeight: !review && g.over ? 700 : 400 }}>{status}</div>
@@ -402,7 +403,7 @@ export default function Janggi() {
               const [x, y] = xy(blocked[1]);
               return (
                 <g data-testid="repetition-blocked" style={{ pointerEvents: "none" }}>
-                  <title>반복수 금지 — 같은 수를 세 번째 둘 수 없어요</title>
+                  <title>반복수 금지 — 한 기물로 두 칸을 계속 오갈 수 없어요</title>
                   <line x1={x - 9} y1={y - 9} x2={x + 9} y2={y + 9} stroke={COL.h} strokeWidth="4" strokeLinecap="round" />
                   <line x1={x + 9} y1={y - 9} x2={x - 9} y2={y + 9} stroke={COL.h} strokeWidth="4" strokeLinecap="round" />
                 </g>
@@ -447,7 +448,7 @@ export default function Janggi() {
         </>}
         <p style={{ fontSize: 13, color: "#65584a", marginTop: 12, lineHeight: 1.6 }}>
           상차림은 각 편이 자기 쪽에서 바라본 왼쪽부터 읽어요. 빅장과 점수 판정은 없고 외통수로 승부가 납니다.
-          반복수: 궁·사가 아닌 기물로 같은 수를 세 번째 둘 수 없어요(장군을 받는 중이거나 잡는 수가 끼면 다시 세요).
+          반복수: 궁·사가 아닌 기물은 두 칸 사이를 세 번 오간 뒤 되돌아갈 수 없어요(같은 자리를 왕복하면 같은 수 세 번째가 막혀요). 장군을 받는 중이거나 잡는 수·쉬기가 끼면 다시 세요.
         </p>
         <p data-testid="license" style={{ fontSize: 12, color: "#65584a", lineHeight: 1.6 }}>
           승률 분석·최강: Fairy-Stockfish (GPL-3.0) ·{" "}

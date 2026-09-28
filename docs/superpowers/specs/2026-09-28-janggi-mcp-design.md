@@ -135,7 +135,7 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
 - 대기 중인 엔진 타이머는 화면 계층이 취소한다.
 
 **API**: 모두 새 상태를 돌려주고, 입력은 바꾸지 않는다.
-- `newGame({controllers, level, setups})`
+- `newGame({controllers, level, setups, bottom = "c", repetition = true})`
 - `play(state, move)`: 불법이면 이유가 담긴 에러를 던진다.
 - `undo(state)`
 - `legalMoves(state)`
@@ -150,6 +150,8 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
   "setups": { "c": "마상마상", "h": "상마상마" },
   "controllers": { "c": "human", "h": "engine" },
   "level": 3,
+  "bottom": "c",
+  "repetition": true,
   "moves": ["b1c3", "h10g8", "pass"],
   "result": null,
   "analysis": {
@@ -276,7 +278,7 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
   - 복기하는 동안 진행 중인 대국은 멈춘다. 엔진 차례를 미루는 것이다. 최강 엔진이 복기 판의 분석을 자기 수로 착각하지 않게 하기 위해서다.
   - 기보에 평가가 이미 있는 지난 국면은 다시 분석하지 않는다. 새로고침한 뒤나 복기할 때 해당된다. 현재 국면은 후보 수와 최강 수가 필요해서 항상 분석한다.
   - "대국으로 돌아가기" 버튼으로 나온다.
-- 판 방향은 9절 규칙을 그 판의 컨트롤러에 적용한다.
+- 판 방향은 그 기보의 `bottom`(아래쪽 나라)을 따른다. 없으면 옛 규칙을 쓴다(9절).
 
 ## 9. 화면 (`src/Janggi.jsx`)
 

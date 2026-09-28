@@ -72,4 +72,54 @@ describe("repetition rule (user request: Kakao Janggi)", () => {
     expect(has(legacy, ["a1", "a2"])).toBe(true);
     expect(game.newGame(humans).repetition).toBe(true);           // 새 판은 규칙을 가진다
   });
+
+  // ---- 리뷰(Opus, 반복수) 반영: 살아남던 뮤턴트를 잡는 핀과 자동 쉬기 묶임 ----
+  const board = (pieces) => { const b = new Array(90).fill(null); for (const [q, p] of Object.entries(pieces)) b[sqIndex(q)] = p; return b; };
+  const at = (pieces, turn = "c") => ({ ...game.newGame(humans), b: board(pieces), turn });
+
+  it("does not block while the side is in check now (the blocked move may be the only good defence)", () => {
+    // 초 차 d3↔e3 왕복을 마친 뒤 한 차가 e10 으로 장군 → 세 번째 d3e3 은 막는 수라 둘 수 있어야 한다
+    const s = playAll(at({ e2: "cK", d3: "cR", f9: "hK", a10: "hR" }),
+      [["d3", "e3"], ["f9", "f10"], ["e3", "d3"], ["f10", "f9"], ["d3", "e3"], ["f9", "f10"], ["e3", "d3"], ["a10", "e10"]]);
+    expect(forbiddenMove(s)).toBeNull();
+    expect(has(s, ["d3", "e3"])).toBe(true);
+  });
+  it("a capture by the arrival move itself resets the count", () => {
+    const s = playAll(at({ e2: "cK", a1: "cR", f9: "hK", a3: "hP" }),
+      [["a1", "a3"], ["f9", "f10"], ["a3", "a2"], ["f10", "f9"], ["a2", "a3"], ["f9", "f10"], ["a3", "a2"], ["f10", "f9"]]);
+    expect(forbiddenMove(s)).toBeNull();
+    expect(has(s, ["a2", "a3"])).toBe(true);
+  });
+  it("never blocks a candidate that captures", () => {
+    const s = playAll(at({ e2: "cK", a1: "cR", f9: "hK", i3: "hR" }),
+      [["a1", "a3"], ["f9", "f10"], ["a3", "a1"], ["f10", "f9"], ["a1", "a3"], ["f9", "f10"], ["a3", "a1"], ["i3", "a3"]]);
+    expect(forbiddenMove(s)).toBeNull();
+    expect(has(s, ["a1", "a3"])).toBe(true);
+  });
+  it("an own pass resets the count (documented simplification; FSF skips one pass)", () => {
+    const s = playAll(game.newGame(humans), [["a1", "a2"], ["e9", "e10"], ["a2", "a1"], ["e10", "e9"], ["a1", "a2"], ["e9", "e10"], ["a2", "a1"], ["e10", "e9"]]);
+    const t = game.play(game.play(s, "pass"), m("e9", "e10"));
+    expect(forbiddenMove(t)).toBeNull();
+    expect(has(t, ["a1", "a2"])).toBe(true);
+  });
+  it("needs an unbroken chain of reversals (a1a3, a3a2, a2a1, a1a2 → a2a1 is fine)", () => {
+    const s = playAll(game.newGame(humans), [["a1", "a3"], ["e9", "e10"], ["a3", "a2"], ["e10", "e9"], ["a2", "a1"], ["e9", "e10"], ["a1", "a2"], ["e10", "e9"]]);
+    expect(forbiddenMove(s)).toBeNull();
+    expect(has(s, ["a2", "a1"])).toBe(true);
+  });
+  it("auto-passes a side whose only move is blocked, and that forced pass resets the count (review MED-1)", () => {
+    // 초 궁 d1 은 한 차 a2·한 마 f3 에 갇혔고, 초 마 a10 은 a9 다리가 막혀 a10c9 하나뿐이다.
+    const s8 = playAll(at({ d1: "cK", a10: "cH", e9: "hK", a2: "hR", f3: "hH", a9: "hP" }),
+      [["a10", "c9"], ["e9", "f9"], ["c9", "a10"], ["f9", "e9"], ["a10", "c9"], ["e9", "f9"], ["c9", "a10"], ["f9", "e9"]]);
+    expect(s8.turn).toBe("h");                               // 막힌 수뿐이라 초는 자동으로 쉬었다
+    expect(s8.msg).toContain("둘 수 없어");
+    const s9 = game.play(s8, m("e9", "f9"));
+    expect(s9.turn).toBe("c");                               // 그 쉼이 셈을 끊는다: 초가 영원히 묶이지 않는다
+    expect(has(s9, ["a10", "c9"])).toBe(true);
+  });
+  it("does not name a move that is illegal anyway (horse leg blocked)", () => {
+    const s = playAll(at({ d1: "cK", b1: "cH", e9: "hK", i2: "hR" }),
+      [["b1", "c3"], ["e9", "f9"], ["c3", "b1"], ["f9", "e9"], ["b1", "c3"], ["e9", "f9"], ["c3", "b1"], ["i2", "b2"]]);
+    expect(forbiddenMove(s)).toBeNull();
+  });
 });

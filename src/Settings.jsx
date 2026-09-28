@@ -52,11 +52,14 @@ export function SettingsPanel({ seats, nowBottom, pending, level, maxReason, onN
         </select>
         {maxReason && <span>최강: {maxReason}</span>}
       </label>
-      {waiting.length > 0 && (
-        <div data-testid="pending" role="status" style={{ marginTop: 10, fontSize: 13, color: "#7a4a00", background: "#f7e4b5", borderRadius: 6, padding: "6px 8px" }}>
-          새 게임부터 적용: {waiting.join(", ")}
-        </div>
-      )}
+      {/* 알림 영역은 항상 둔다: 내용이 든 채로 새로 끼워 넣은 status 는 스크린리더가 읽지 않을 수 있다(리뷰 LOW). */}
+      <div role="status" aria-live="polite">
+        {waiting.length > 0 && (
+          <div data-testid="pending" style={{ marginTop: 10, fontSize: 13, color: "#7a4a00", background: "#f7e4b5", borderRadius: 6, padding: "6px 8px" }}>
+            새 게임부터 적용: {waiting.join(", ")}
+          </div>
+        )}
+      </div>
       <p style={{ fontSize: 12, color: "#65584a", margin: "10px 0 0", lineHeight: 1.6 }}>
         두는 이(사람/엔진)는 고르는 즉시 바뀌어요. 나라·상차림·난이도는 새 게임을 누르면 적용돼요. 선수는 항상 초나라예요.
       </p>

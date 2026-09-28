@@ -24,7 +24,7 @@ export function play(state, move) {
   if (state.over) throw new Error("이미 끝난 대국이에요.");
   const blocked = forbiddenMove(state);
   if (blocked && Array.isArray(move) && move[0] === blocked[0] && move[1] === blocked[1])
-    throw new Error("반복수: 같은 수를 세 번째 둘 수 없어요.");
+    throw new Error("반복수: 한 기물로 두 칸을 계속 오갈 수 없어요.");
   if (move === "pass") {
     if (inCheck(state.b, state.turn)) throw new Error("장군일 때는 쉴 수 없어요.");
   } else if (!Array.isArray(move) || move.length !== 2 ||

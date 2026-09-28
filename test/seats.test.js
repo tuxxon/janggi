@@ -41,3 +41,13 @@ describe("seats: top/bottom settings (user request 2026-09-28)", () => {
     expect(whoApplied(game({ bottom: "h", controllers: { c: "engine", h: "human" } }), "bottom", "engine")).toEqual({ c: "engine", h: "engine" });
   });
 });
+
+describe("who-plays on a finished game (review MED)", () => {
+  it("only prepares the next game: a finished game's controllers (and so its record and result wording) stay", async () => {
+    const { withWho } = await import("../src/seats.js");
+    const live = { ...game(), over: null };
+    expect(withWho(live, "top", "human").controllers).toEqual({ c: "human", h: "human" });
+    const finished = { ...game(), over: "h", result: { winner: "h", reason: "외통수" } };
+    expect(withWho(finished, "bottom", "engine")).toBe(finished);
+  });
+});

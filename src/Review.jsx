@@ -42,7 +42,8 @@ export function GameList({ items, liveId, onOpen, onExport, onExportAll, onImpor
 
 export function WinChart({ evals, k, onPick }) {
   // 좌우 여백(PAD): 첫 수·마지막 수의 현재 위치 선이 가장자리에서 잘리지 않게.
-  const W = 520, PAD = 8, w = W - PAD * 2, h = 90, pts = chartPoints(evals, w, h).map((p) => ({ ...p, x: p.x + PAD })), n = evals.length;
+  // 옆 패널(약 340px)에서도 읽히게 세로를 키웠다(리뷰 LOW).
+  const W = 520, PAD = 8, w = W - PAD * 2, h = 130, pts = chartPoints(evals, w, h).map((p) => ({ ...p, x: p.x + PAD })), n = evals.length;
   const xOf = (ply) => PAD + (n <= 1 ? w / 2 : (ply * w) / (n - 1));
   const pick = (e) => {
     const box = e.currentTarget.getBoundingClientRect();
@@ -62,8 +63,8 @@ export function WinChart({ evals, k, onPick }) {
       {segs.map((s, i) => <polyline key={i} points={s.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={COL.c} strokeWidth="2.5" />)}
       {pts.length === 1 && <circle cx={pts[0].x} cy={pts[0].y} r="3" fill={COL.c} />}
       <line data-testid="chart-cursor" x1={xOf(k)} y1="0" x2={xOf(k)} y2={h} stroke="#e3a21a" strokeWidth="2.5" />
-      <text x={PAD + 2} y="12" fontSize="11" fill={COL.c}>초 100%</text>
-      <text x={PAD + 2} y={h - 4} fontSize="11" fill={COL.h}>한 100%</text>
+      <text x={PAD + 2} y="16" fontSize="15" fill={COL.c}>초 100%</text>
+      <text x={PAD + 2} y={h - 5} fontSize="15" fill={COL.h}>한 100%</text>
     </svg>
   );
 }
