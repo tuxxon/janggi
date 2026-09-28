@@ -299,3 +299,22 @@ test("반복수: 같은 수를 세 번째 두려 하면 그 칸에 ✕가 뜨고
   await expect.poll(async () => (await latestRecord(page)).moves.at(-1)).toBe("a1a3");
   await expect(page.getByTestId("notice")).toHaveCount(0);
 });
+
+test("상대가 한 수 쉬면 반복수 셈이 끊겨, 막혔을 수를 둘 수 있다 (사용자 요청)", async ({ page }) => {
+  await openGame(page);
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");   // 사람끼리
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await clickSq(page, 9, 0); await clickSq(page, 8, 0);                          // 초 a1a2
+  await clickSq(page, 1, 4); await clickSq(page, 0, 4);                          // 한 e9e10
+  await clickSq(page, 8, 0); await clickSq(page, 9, 0);                          // 초 a2a1
+  await page.getByRole("button", { name: "한 수 쉬기" }).click();                  // 한 쉬기
+  await clickSq(page, 9, 0); await clickSq(page, 8, 0);                          // 초 a1a2
+  await clickSq(page, 0, 4); await clickSq(page, 1, 4);                          // 한 e10e9
+  await clickSq(page, 8, 0); await clickSq(page, 9, 0);                          // 초 a2a1
+  await clickSq(page, 1, 4); await clickSq(page, 0, 4);                          // 한 e9e10
+  await expect.poll(async () => (await latestRecord(page)).moves).toEqual(["a1a2", "e9e10", "a2a1", "pass", "a1a2", "e10e9", "a2a1", "e9e10"]);
+  await clickSq(page, 9, 0);                                                     // 초 차: 세 번째 a1a2 지만 한이 쉬었다
+  await expect(page.getByTestId("repetition-blocked")).toHaveCount(0);
+  await clickSq(page, 8, 0);
+  await expect.poll(async () => (await latestRecord(page)).moves.at(-1)).toBe("a1a2");
+});

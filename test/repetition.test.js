@@ -122,4 +122,23 @@ describe("repetition rule (user request: Kakao Janggi)", () => {
       [["b1", "c3"], ["e9", "f9"], ["c3", "b1"], ["f9", "e9"], ["b1", "c3"], ["e9", "f9"], ["c3", "b1"], ["i2", "b2"]]);
     expect(forbiddenMove(s)).toBeNull();
   });
+
+  // ---- 사용자 요청(2026-09-28): "상대방이 한 수 쉬면, 우린 둘 수 있는 거거든" → 상대의 쉬기도 셈을 끊는다 ----
+  it("an opponent's pass lets the shuttling side play the move again", () => {
+    // 초 a1a2, 한 e9e10, 초 a2a1, 한 쉬기, 초 a1a2, 한 e10e9, 초 a2a1, 한 e9e10 → 초의 세 번째 a1a2 를 둘 수 있다
+    let s = playAll(game.newGame(humans), [["a1", "a2"], ["e9", "e10"], ["a2", "a1"]]);
+    s = game.play(s, "pass");
+    s = playAll(s, [["a1", "a2"], ["e10", "e9"], ["a2", "a1"], ["e9", "e10"]]);
+    expect(forbiddenMove(s)).toBeNull();
+    expect(has(s, ["a1", "a2"])).toBe(true);
+  });
+  it("an opponent's forced pass (it has no legal move) also lets the side keep playing", () => {
+    // 한 궁 d10 은 초 차 a9(d9·e9)·초 마 f8(e10)에 갇혀 둘 수가 없다 → 초가 수를 둘 때마다 한은 자동으로 쉰다
+    let s = at({ e2: "cK", i1: "cR", a9: "cR", f8: "cH", d10: "hK" });
+    s = game.play(s, m("i1", "i2"));
+    expect(s.turn).toBe("c");                                  // 한이 자동으로 쉬었다
+    s = playAll(s, [["i2", "i1"], ["i1", "i2"], ["i2", "i1"]]);
+    expect(forbiddenMove(s)).toBeNull();
+    expect(has(s, ["i1", "i2"])).toBe(true);
+  });
 });
