@@ -11,9 +11,10 @@ function info(line) {
   if (!score || !depth || (!move && !(score[1] === "mate" && Number(score[2]) === 0))) return null;
   const value = { [score[1]]: Number(score[2]) };
   // bound: lowerbound/upperbound — 정확하지 않은 점수. 평가(1순위)에는 쓰지 않고, 후보 묶음에서는 그 점수로 쓴다.
+  // 후보마다 그 줄의 깊이: 2단계 목록은 깊이가 다른 점수를 섞으므로 숨기지 않는다(개정 2.10).
   return { rank: Number(/\bmultipv (\d+)/.exec(line)?.[1] ?? 1), depth: Number(depth[1]),
     score: value, win: winFromScore(value), bound: /\b(?:lowerbound|upperbound)\b/.test(line),
-    candidate: move ? { move: moveToUci(move), ...value, win: winFromScore(value) } : null };
+    candidate: move ? { move: moveToUci(move), ...value, win: winFromScore(value), depth: Number(depth[1]) } : null };
 }
 const deferred = () => {
   let resolve, reject;
@@ -22,6 +23,10 @@ const deferred = () => {
 };
 // 감시 타이머는 탐색 시간 + RESPONSE_TIMEOUT: 20초 깊게 보기가 "응답 없음"으로 끝나지 않게.
 const RESPONSE_TIMEOUT = 15000, NETWORK_TIMEOUT = 20000;
+// 무제한(go infinite) 깊게 보기의 감시: 엔진 줄이 이 시간 동안 하나도 오지 않으면 실패. 줄이 올 때마다 다시 건다.
+// max(60초, 가장 긴 줄 간격 × 3). 실측(2026-09-30, M3 Max, WASM 1.1.12 Node, 중반 국면, MultiPV 1, 신경망 없음, Hash 256,
+// 5분 go infinite): 1스레드 97.6초(깊이 31 의 첫 수, 줄 1143개), 4스레드 68.1초(깊이 33 의 첫 수, 줄 922개) → 97.6 × 3.
+const SILENCE_TIMEOUT = 293000;
 export const MODES = ["fast", "deep", "continuous"];
 // 카카오식 반복수를 아는 변형: janggicasual(빅장·점수 판정 없음) + 반복 금지. janggicasual 은 반복을 무승부로 읽어서
 // 지고 있는 쪽이 반복으로 버틸 수 있다고 계산했다(사용자 보고 2026-09-29). nFoldRule 4 는 FSF janggimodern 과 같다
@@ -29,9 +34,16 @@ export const MODES = ["fast", "deep", "continuous"];
 export const KAKAO = { name: "janggikakao", path: "/janggi-kakao.ini",
   ini: "[janggikakao:janggicasual]\nmoveRepetitionIllegal = true\nnFoldRule = 4\n" };
 export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 20000, max: 3000, focus: 500 };
+// 저장된 판 복기의 2단계 깊게 보기 상한(개정 2.10). 무제한은 Infinity(go infinite). 1분 이상이면 Hash 256.
+export const DEEP_CAPS = [20000, 60000, 300000, Infinity];
+const LONG_CAP = 60000, LONG_HASH = 256;
 function checkMode(mode) {
   if (!MODES.includes(mode)) throw new Error(`알 수 없는 분석 모드예요: ${mode}`);
   return mode;
+}
+function checkCap(cap) {
+  if (cap !== null && !DEEP_CAPS.includes(cap)) throw new Error(`알 수 없는 깊게 보기 상한이에요: ${cap}`);
+  return cap;
 }
 // 저장된 신경망 불러오기(Cache Storage·dev fetch)가 끝나지 않아도 기본 평가로 시작한다.
 const settleWithin = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
@@ -41,7 +53,9 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   threads = 1, hash = 32, mode = "fast" }) {
   checkMode(mode);
   // deepenPly: 깊게 볼 국면(null 이면 마지막 국면). capped: 20초 상한을 다 채운 국면(다시 깊게 보지 않는다).
-  let engine, listener, gameId, entries = [], active = null, focus = null, deepenPly = null;
+  // deepCap: null 이면 지금 "계속"(MultiPV 5 · 20초), 값이 있으면 저장된 판 복기의 2단계(MultiPV 1 · 그 상한).
+  // engineHash: 엔진에 마지막으로 보낸 Hash. 원하는 값(wantedHash)과 다르면 탐색이 멈춘 뒤 pump 가 바꾼다.
+  let engine, listener, gameId, entries = [], active = null, focus = null, deepenPly = null, deepCap = null, engineHash = null;
   let available = false, disposed = false, failures = 0, generation = 0, timer;
   let network = null, networkChange = null, configuring = false;
   const waiters = new Set();
@@ -52,6 +66,12 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     if (!disposed) onStatus(status);
   }
   const send = (command) => engine.postMessage(command);
+  const wantedHash = () => (deepCap !== null && deepCap >= LONG_CAP ? LONG_HASH : hash);
+  function watch(ms) {
+    const gen = generation;
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (gen === generation) void fail(new Error("엔진 탐색 응답 시간이 초과됐어요.")); }, ms);
+  }
   function exchange(command, response) {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => finish(new Error("엔진 응답 시간이 초과됐어요.")), RESPONSE_TIMEOUT);
@@ -122,39 +142,43 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     send(`setoption name Use NNUE value ${network ? "true" : "false"}`);
     status = { ...status, nnue: "off" };
   }
+  // 신경망 교체·Hash 변경: 탐색이 멈춰 있을 때만(pump 가 active 없을 때 부른다), 끝나면 isready 로 확인한다.
   async function configure() {
     configuring = true;
     const change = networkChange, gen = generation;
     try {
-      writeNetwork();
+      if (change) writeNetwork();
+      if (wantedHash() !== engineHash) { engineHash = wantedHash(); send(`setoption name Hash value ${engineHash}`); }
       await exchange("isready", "readyok");
       if (disposed || gen !== generation) return;
-      if (networkChange === change) networkChange = null;
-      configuring = false; change.resolve();
+      if (change && networkChange === change) networkChange = null;
+      configuring = false; change?.resolve();
       publish(); pump();
     } catch (error) { if (gen === generation) void fail(error); }
   }
   function pump() {
     if (!available || disposed || active || configuring) return;
-    if (networkChange) { void configure(); return; }
+    if (networkChange || wantedHash() !== engineHash) { void configure(); return; }
     // 최강 엔진 차례는 밀린 지난 국면 분석보다 먼저 탐색한다(엔진이 수십 초 기다리지 않게). 나머지는 순서대로.
     const open = (e) => !e.result && !e.error;
     // 우선순위: 최강 > 밀린 국면 > 초점 > 깊게 보기(할 일이 없을 때만).
     const entry = entries.find((e) => e.max && open(e)) ?? entries.find(open);
     const target = !entry && !focus && deepenTarget();
     if (!entry && !focus && !target) return;
+    // 2단계(cap): 저장된 판 복기의 깊게 보기. 1단계 후보는 그대로 두고 1순위만 그 상한까지 MultiPV 1 로 읽는다.
     const job = entry ? { entry, movetime: entry.max ? MOVETIME.max : MOVETIME[mode] }
-      : focus ? { entry: focus.entry, focus, movetime: MOVETIME.focus } : { entry: target, deepen: true, movetime: MOVETIME.deepen };
+      : focus ? { entry: focus.entry, focus, movetime: MOVETIME.focus }
+      : { entry: target, deepen: true, movetime: deepCap ?? MOVETIME.deepen, ...(deepCap !== null ? { cap: deepCap } : {}) };
     active = { ...job, gameId, mode, lines: new Map(), cancelled: false };
-    const gen = generation;
-    timer = setTimeout(() => { if (gen === generation) void fail(new Error("엔진 탐색 응답 시간이 초과됐어요.")); }, job.movetime + RESPONSE_TIMEOUT);
+    // 무제한은 끝이 없으므로 무응답 감시(줄이 올 때마다 다시 건다, receive). 상한이 있으면 상한 + 여유.
+    watch(job.movetime === Infinity ? SILENCE_TIMEOUT : job.movetime + RESPONSE_TIMEOUT);
     try {
-      // 최강 수는 MultiPV 1: 후보 5개를 함께 탐색하면 최선수에 쓸 시간이 나뉘어 약해진다(리뷰).
-      send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : job.entry.max ? 1 : 5}`);
+      // 최강 수와 2단계는 MultiPV 1: 후보 5개를 함께 탐색하면 최선수에 쓸 시간이 나뉘어 약해진다(리뷰, 개정 2.10 실측).
+      send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : job.entry.max || job.cap !== undefined ? 1 : 5}`);
       send(job.entry.position ?? `position fen ${job.entry.fen}`);
       // 반복수로 막힌 수가 있는 국면은 루트 수를 제한한다(searchmoves). 초점 분석은 원래 그 기물의 수만 본다.
       const roots = job.focus ? job.focus.moves : job.entry.searchmoves;
-      send(`go movetime ${job.movetime}${roots ? " searchmoves " + roots.join(" ") : ""}`);
+      send(`go ${job.movetime === Infinity ? "infinite" : `movetime ${job.movetime}`}${roots ? " searchmoves " + roots.join(" ") : ""}`);
       publish();
     } catch (error) { void fail(error); }
   }
@@ -164,7 +188,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     const kind = score.cp !== undefined ? "cp" : "mate";
     return { gameId: job.gameId, fen: entry.fen, ply: entry.ply,
       [kind]: score[kind] * sign || 0, win: sign === 1 ? primary.win : 100 - primary.win,
-      depth: primary.depth, candidates, best, nnue: status.nnue, movetime: job.movetime, mode: job.mode, threads };
+      depth: primary.depth, candidates, best, nnue: status.nnue, movetime: job.movetime === Infinity ? "infinite" : job.movetime,
+      mode: job.mode, threads, ...(job.cap !== undefined ? { deepCap: job.cap, stable: entry.stable.n } : {}) };
   }
   // 기보에 저장된 평가(known)가 더 깊으면 평가는 그대로 두고 후보 수·최선수만 새로 쓴다: 마지막 국면은 후보 때문에
   // 항상 다시 탐색하는데, 새로고침·복기 전환 뒤의 0.8초 결과가 "계속"으로 깊게 읽어 둔 평가를 덮어쓰지 않게(리뷰 A F1).
@@ -181,6 +206,17 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   const candidatesOf = (lines, primary) => [...lines].sort(([a], [b]) => a - b)
     .map(([rank, v]) => (rank === 1 && primary?.candidate && v.candidate?.move === primary.candidate.move ? primary : v).candidate)
     .filter(Boolean).filter((c, i, all) => all.findIndex((x) => x.move === c.move) === i);
+  // 2단계 후보: 2단계의 1순위(평가 줄) + 1단계 목록에서 그 수를 뺀 것(1단계 순서·값·깊이 그대로). 1단계는 MultiPV 5 라
+  // 1순위가 1단계 5개 밖의 수면 1단계 5순위가 빠진다(2~5순위 = 1단계, 개정 2.10). 1단계가 없으면(저장된 평가만) 1순위 하나.
+  const mergedCandidates = (first, primary) =>
+    [primary.candidate, ...(first ?? []).filter((c) => c.move !== primary.candidate?.move)].filter(Boolean).slice(0, 5);
+  // 같은 수 N깊이째: 2단계의 정확한 1순위 줄이 센 깊이보다 깊으면 같은 수는 N+1, 다른 수는 1. 같은 깊이에 다른 수가 오면 1.
+  // 국면(entry)에 두어 선점 뒤 다시 시작한 탐색도 보여준 깊이에서 이어 센다(얕은 줄은 세지 않는다).
+  function countStable(entry, parsed) {
+    const move = parsed.candidate?.move, last = entry.stable;
+    if (!last || parsed.depth > last.depth) entry.stable = { depth: parsed.depth, move, n: last?.move === move ? last.n + 1 : 1 };
+    else if (parsed.depth === last.depth && move !== last.move) entry.stable = { depth: parsed.depth, move, n: 1 };
+  }
   function receive(line) {
     if (typeof line !== "string") { void fail(line); return; }
     for (const waiter of [...waiters]) waiter.receive(line);
@@ -190,16 +226,21 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       status = { ...status, nnue: "off" }; publish();
     }
     if (!active) return;
+    if (active.movetime === Infinity) watch(SILENCE_TIMEOUT);
     const parsed = info(line);
     if (parsed) {
       active.lines.set(parsed.rank, parsed); active.ranks = Math.max(active.ranks ?? 0, parsed.rank);
-      if (parsed.rank === 1 && !parsed.bound) active.primary = parsed; // 평가(점수·깊이)는 가장 최근의 정확한 1순위 줄
+      if (parsed.rank === 1 && !parsed.bound) {
+        active.primary = parsed; // 평가(점수·깊이)는 가장 최근의 정확한 1순위 줄
+        if (active.cap !== undefined && !active.cancelled) countStable(active.entry, parsed);
+      }
     }
     // 깊게 보기는 점진 결과: 묶음의 마지막 순위가 왔을 때, 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
-    // (선점 뒤 다시 시작한 얕은 탐색이 표시를 되돌리지 않게).
+    // (선점 뒤 다시 시작한 얕은 탐색이 표시를 되돌리지 않게). 2단계(MultiPV 1)는 묶음이 1순위 한 줄이라 정확한 1순위 줄마다다.
     const primary = active.primary;
     if (parsed && parsed.rank === active.ranks && active.deepen && !active.cancelled && primary?.depth > active.entry.result.depth) {
-      active.entry.result = resultOf(active, primary, candidatesOf(active.lines, primary), primary.candidate ? uciToMove(primary.candidate.move) : null);
+      const candidates = active.cap !== undefined ? mergedCandidates(active.entry.first, primary) : candidatesOf(active.lines, primary);
+      active.entry.result = resultOf(active, primary, candidates, primary.candidate ? uciToMove(primary.candidate.move) : null);
       onResult(active.entry.result);
     }
     if (!line.startsWith("bestmove ")) return;
@@ -222,6 +263,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
           void fail(new Error("엔진이 평가 점수를 보내지 않았어요.")); return;
         } else {
           entry.result = keepDeeper(entry.known, resultOf(job, primary, candidates, best));
+          entry.first = candidates; // 1단계 후보: 2단계 결과가 entry.result 를 덮어도 목록의 2~5순위로 쓴다
           onResult(entry.result);
           settle(entry, best);
         }
@@ -244,7 +286,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       send(`setoption name VariantPath value ${KAKAO.path}`);
       send(`setoption name UCI_Variant value ${KAKAO.name}`);
       send(`setoption name Threads value ${threads}`);
-      send(`setoption name Hash value ${hash}`);
+      engineHash = wantedHash();
+      send(`setoption name Hash value ${engineHash}`);
       writeNetwork();
       await exchange("isready", "readyok");
       if (gen !== generation || disposed) return;
@@ -308,11 +351,20 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       if (mode !== "continuous") stopDeepening();
       publish(); pump();
     },
-    // 복기에서 보고 있는 국면을 깊게 본다. null 이면 마지막 국면(대국).
-    deepen(ply) {
-      deepenPly = ply ?? null;
-      if (active?.entry !== deepenTarget()) stopDeepening();
+    // 복기에서 보고 있는 국면을 깊게 본다. null 이면 마지막 국면(대국). cap: null 이면 지금 "계속"(진행 중인 판과 그 복기),
+    // 20000·60000·300000·Infinity 면 저장된 판 복기의 2단계. 상한이 바뀌면 다 읽은 국면을 풀고 달리는 깊게 보기를 새 상한으로 다시 본다.
+    deepen(ply, cap = null) {
+      const capChanged = checkCap(cap) !== deepCap;
+      deepenPly = ply ?? null; deepCap = cap;
+      if (capChanged) for (const entry of entries) entry.capped = false;
+      if (capChanged || active?.entry !== deepenTarget()) stopDeepening();
       pump();
+    },
+    // 멈춤: 달리는 깊게 보기를 멈추고 그 국면을 다 읽은 것으로 친다(결과는 남는다, 상한을 바꾸면 다시 본다).
+    haltDeepen() {
+      if (!active?.deepen || active.cancelled) return;
+      active.entry.capped = true;
+      stopDeepening();
     },
     setNetwork(bytes, name = networkName) {
       if (status.state === "disabled") return Promise.reject(new Error(status.reason));
@@ -322,7 +374,9 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       networkChange = deferred();
       const promise = networkChange.promise;
       // 다른 신경망으로 만든 저장 평가는 새 평가를 붙잡지 않는다.
-      for (const entry of entries) { entry.result = null; entry.error = null; entry.capped = false; entry.known = null; }
+      for (const entry of entries) {
+        entry.result = null; entry.error = null; entry.capped = false; entry.known = null; entry.first = null; entry.stable = null;
+      }
       onReset();
       stop(); publish(); pump();
       return promise;
