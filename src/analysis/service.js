@@ -172,8 +172,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     const { cp, mate, ...rest } = result;
     return { ...rest, ...(known.cp !== undefined ? { cp: known.cp } : { mate: known.mate }), win: known.win, depth: known.depth };
   }
-  // 순위별 마지막 줄을 모은다. 탐색이 반복 도중 멈추면 뒤 순위에 이전 깊이의 줄이 남아 같은 수가 두 번 들어갈 수 있다
-  // → 앞 순위(최신) 것만 남긴다.
+  // 순위별 줄 → 후보(순위순). 보통은 한 묶음(complete)이라 수가 겹치지 않는다. 완성된 묶음이 없을 때만 섞인 줄이 오므로
+  // 겹치면 앞 순위 것만 남긴다.
   const candidatesOf = (lines) => [...lines].sort(([a], [b]) => a - b).map(([, v]) => v.candidate).filter(Boolean)
     .filter((c, i, all) => all.findIndex((x) => x.move === c.move) === i);
   function receive(line) {
@@ -186,13 +186,20 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     }
     if (!active) return;
     const parsed = info(line);
-    if (parsed) { active.lines.set(parsed.rank, parsed); active.ranks = Math.max(active.ranks ?? 0, parsed.rank); }
-    // 깊게 보기는 점진 결과: 엔진은 반복마다 1~N순위를 한 묶음으로 찍는다. 묶음의 마지막 순위가 왔을 때(1순위 줄만 새 깊이면
-    // 나머지가 이전 반복 것이라 같은 수가 겹쳐 후보가 빠진다), 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
+    // 엔진은 반복(깊이)마다 1~N순위를 한 묶음으로 찍고, 한 묶음 안의 수는 서로 다르다. 탐색이 반복 도중 멈추면 그때 보던
+    // 순위 한 줄이 lowerbound/upperbound 로 온다(info 가 버린다). 순위별 최신 줄을 섞으면 이전 묶음의 수가 끼어 같은 수가
+    // 겹치고 후보가 빠졌다(실측 0.8초 30번 중 2번) → 후보는 모든 순위가 정확한 마지막 묶음(complete)에서만 만든다.
+    const rank = /\bscore (?:cp|mate) /.test(line) ? Number(/\bmultipv (\d+)/.exec(line)?.[1] ?? 1) : 0;
+    if (rank === 1) active.batch = new Map();
+    if (rank) { active.batch?.set(rank, parsed); active.ranks = Math.max(active.ranks ?? 0, rank); }
+    if (parsed) active.lines.set(parsed.rank, parsed);
+    const completed = rank > 0 && rank === active.ranks && active.batch?.size === rank && [...active.batch.values()].every(Boolean);
+    if (completed) active.complete = active.batch;
+    // 깊게 보기는 점진 결과: 묶음이 완성됐을 때, 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
     // (선점 뒤 다시 시작한 얕은 탐색이 표시를 되돌리지 않게).
     const primary = active.lines.get(1);
-    if (parsed && parsed.rank === active.ranks && active.deepen && !active.cancelled && primary?.depth > active.entry.result.depth) {
-      active.entry.result = resultOf(active, primary, candidatesOf(active.lines), primary.candidate ? uciToMove(primary.candidate.move) : null);
+    if (completed && active.deepen && !active.cancelled && primary?.depth > active.entry.result.depth) {
+      active.entry.result = resultOf(active, primary, candidatesOf(active.complete), primary.candidate ? uciToMove(primary.candidate.move) : null);
       onResult(active.entry.result);
     }
     if (!line.startsWith("bestmove ")) return;
@@ -202,7 +209,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     if (job.deepen) {
       if (!job.cancelled) job.entry.capped = true; // 상한까지 다 읽었다(선점으로 멈춘 것은 나중에 이어서 본다)
     } else if (!job.cancelled) {
-      const candidates = candidatesOf(job.lines);
+      const candidates = candidatesOf(job.complete ?? job.lines);
       if (job.focus) {
         focus = null;
         job.focus.resolve(candidates.filter((c) => job.focus.moves.includes(c.move)));
