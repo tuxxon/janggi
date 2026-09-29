@@ -25,3 +25,5 @@ npm run test:e2e   # 빌드 후 Playwright (Chromium + WebKit 스모크, 포트�
 GPL-3.0-or-later. 브라우저에서 도는 [Fairy-Stockfish WASM](https://github.com/fairy-stockfish/fairy-stockfish.wasm)(GPL-3.0)을 함께 배포하기 때문이다. GitHub Pages는 헤더를 설정할 수 없어 [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker)(MIT)로 교차 출처 격리를 켠다. `vendor/coi-serviceworker.js`는 304 응답 처리를 고친 수정본이다. 원본 그대로면 WebKit(사파리·아이폰)에서 엔진 워커가 뜨지 않는다. 제3자 라이선스 원문은 배포본의 `licenses/THIRD_PARTY_NOTICES.txt`에 있다.
 
 설계 문서: [docs/superpowers/specs/2026-09-28-janggi-mcp-design.md](docs/superpowers/specs/2026-09-28-janggi-mcp-design.md)
+
+이어서 작업할 때는 먼저 [docs/HANDBOOK.md](docs/HANDBOOK.md)를 읽는다(현재 상태, 진행 중인 일, 결정 사항, 함정).
