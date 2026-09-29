@@ -156,9 +156,10 @@ describe("review deep look (spec 2.10: saved-game review only)", () => {
     expect(panel(deep({ deepening: true }))).toMatch(/<button[^>]*>멈춤<\/button>/);
     expect(panel(deep({ deepening: false }))).not.toContain("멈춤");
   });
-  it("says the deep look needs the continuous mode when another mode is chosen", () => {
-    expect(panel(deep({ continuous: false }))).toContain("분석 모드가 &#x27;계속&#x27;일 때 깊게 봐요");
+  it("says the deep look needs the continuous mode when another mode is chosen, with a button to switch to it", () => {
+    expect(panel(deep({ continuous: false }))).toMatch(/분석 모드가 &#x27;계속&#x27;일 때 깊게 봐요<\/span><button[^>]*>계속으로 바꾸기<\/button>/);
     expect(panel(deep({ continuous: true }))).not.toContain("분석 모드가");
+    expect(panel(deep({ continuous: true }))).not.toContain("계속으로 바꾸기");
   });
   it("has no deep-look row in the review of the live game", () => {
     const html = panel(null);
@@ -166,6 +167,7 @@ describe("review deep look (spec 2.10: saved-game review only)", () => {
     expect(html).not.toContain("깊게 보기");
     expect(html).not.toContain("멈춤");
     expect(html).not.toContain("분석 모드가");
+    expect(html).not.toContain("계속으로 바꾸기");
   });
 
   const list = (depth) => renderToStaticMarkup(createElement(Candidates, { board: newGame().b, depth,

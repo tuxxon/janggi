@@ -297,18 +297,38 @@ test("저장된 판 복기: 깊게 보기 20초로 '같은 수 N깊이째'가 �
   await expect(bar(page)).not.toContainText("계속 분석 중");                    // 멈춘 국면은 다시 깊게 보지 않는다
 });
 
-test("진행 중인 판의 복기에는 깊게 보기 줄이 없고, 저장된 판 복기에는 있다(계속이 아니면 안내)", async ({ page }) => {
+test("진행 중인 판의 복기에는 깊게 보기 줄이 없고, 저장된 판 복기에는 있다(계속이 아니면 안내와 '계속으로 바꾸기')", async ({ page }) => {
   await seed(page, [live, old]);                                               // 분석 모드 빠르게
   await openGame(page, 0);                                                     // 진행 중인 판
   await expect(status(page)).toHaveText("복기 중 · 0/1수");
   await expect(capSelect(page)).toHaveCount(0);
   await expect(page.getByText("분석 모드가 '계속'일 때 깊게 봐요")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "계속으로 바꾸기" })).toHaveCount(0);
   await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
   await openGame(page, 1);                                                     // 저장된 판
   await expect(status(page)).toHaveText("복기 중 · 0/3수");
   await expect(capSelect(page)).toHaveCount(1);
   await expect(page.getByText("분석 모드가 '계속'일 때 깊게 봐요")).toBeVisible();
   await expect(page.getByRole("button", { name: "멈춤" })).toHaveCount(0);
+  // 설정 패널은 복기 중에 없다(최종 리뷰 B): 안내 옆 버튼이 설정의 "분석"과 같은 값(janggi.prefs)을 바꾸고, 복기 자리에서 깊게 보기가 시작된다.
+  await page.getByRole("button", { name: "계속으로 바꾸기" }).click();
+  await expect(page.getByText("분석 모드가 '계속'일 때 깊게 봐요")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("janggi.prefs"))).toBe('{"analysis":"continuous","reviewDeep":20000}');
+  await expect(bar(page)).toContainText(/깊이 \d+ · 같은 수 \d+깊이째 · 계속 분석 중/, { timeout: 30_000 });
+  await expect(status(page)).toHaveText("복기 중 · 0/3수");
+});
+
+test("깊게 보기 상한을 고른 뒤에도 ← → 로 복기를 움직인다(선택 상자가 초점을 놓는다)", async ({ page }) => {
+  await seed(page, [live, old]);
+  await openGame(page, 1);
+  await expect(status(page)).toHaveText("복기 중 · 0/3수");
+  await capSelect(page).focus();                                               // 마우스로 고를 때처럼 초점이 선택 상자에 있다
+  await capSelect(page).selectOption("60000");
+  await page.keyboard.press("ArrowRight");
+  await expect(status(page)).toHaveText("복기 중 · 1/3수");
+  await page.keyboard.press("ArrowLeft");
+  await expect(status(page)).toHaveText("복기 중 · 0/3수");
+  await expect(capSelect(page)).toHaveValue("60000");                          // 화살표가 상한을 바꾸지 않았다
 });
 
 test("깊게 보기 상한은 새로고침해도 기억한다", async ({ page }) => {

@@ -71,7 +71,7 @@ export function WinChart({ evals, k, onPick }) {
   );
 }
 
-// deep: 저장된 판 복기의 깊게 보기(개정 2.10) — { value, onChange, deepening, onHalt, continuous }. 진행 중인 판의 복기는 null.
+// deep: 저장된 판 복기의 깊게 보기(개정 2.10) — { value, onChange, deepening, onHalt, continuous, onContinuous }. 진행 중인 판의 복기는 null.
 export function ReviewPanel({ rows, k, n, setK, evals, onExit, deep }) {
   const nav = [["처음", "⏮", 0], ["이전 수", "◀", k - 1], ["다음 수", "▶", k + 1], ["마지막 수", "⏭", n]];
   return (
@@ -85,12 +85,14 @@ export function ReviewPanel({ rows, k, n, setK, evals, onExit, deep }) {
       {deep && <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13 }}>
         <label style={{ display: "flex", alignItems: "center", gap: 6 }}>깊게 보기
           <select aria-label="깊게 보기" value={String(deep.value)} style={{ padding: "5px 6px", borderRadius: 7, border: "1.5px solid #4e3118", background: "#f3eee4", color: "#261d15", fontSize: 13 }}
-            onChange={(e) => deep.onChange(REVIEW_DEEP.find((v) => String(v) === e.target.value))}>
+            onChange={(e) => { deep.onChange(REVIEW_DEEP.find((v) => String(v) === e.target.value)); e.target.blur(); /* ← → 가 복기를 움직이게(최종 리뷰 B) */ }}>
             {REVIEW_DEEP.map((v) => <option key={v} value={v}>{DEEP_LABEL[v]}</option>)}
           </select>
         </label>
         {deep.deepening && <button style={small} onClick={deep.onHalt}>멈춤</button>}
-        {!deep.continuous && <span style={{ color: "#65584a" }}>분석 모드가 '계속'일 때 깊게 봐요</span>}
+        {/* 설정 패널은 복기 중에 없어서 모드는 여기서 바꾼다(설정의 "분석"과 같은 값, 최종 리뷰 B). */}
+        {!deep.continuous && <><span style={{ color: "#65584a" }}>분석 모드가 '계속'일 때 깊게 봐요</span>
+          <button style={small} onClick={deep.onContinuous}>계속으로 바꾸기</button></>}
       </div>}
       <WinChart evals={Array.from({ length: n + 1 }, (_, i) => evals?.[i] ?? null)} k={k} onPick={setK} />
       <ol style={{ listStyle: "none", padding: 0, margin: "8px 0 0", maxHeight: 220, overflowY: "auto", fontSize: 13, background: "#e2dccf", borderRadius: 8 }}>

@@ -476,7 +476,7 @@ export default function Janggi() {
       <aside style={{ flex: "1 1 300px", maxWidth: 560, minWidth: 0 }}>
         {review ? <ReviewPanel rows={rows} k={review.k} n={review.record.moves.length} setK={setK} evals={analysis.evals} onExit={exitReview}
           deep={savedReview ? { value: prefs.reviewDeep, onChange: changeReviewDeep, deepening: analysis.status.deepening,
-            onHalt: analysis.haltDeepen, continuous: prefs.analysis === "continuous" } : null} /> : <>
+            onHalt: analysis.haltDeepen, continuous: prefs.analysis === "continuous", onContinuous: () => changeAnalysis("continuous") } : null} /> : <>
         <SettingsPanel seats={seats} nowBottom={bottomOf(g)} pending={pendingOf(seats, level, g)} level={level}
           maxReason={analysis.status.state !== "ready" ? analysis.status.reason || "엔진 준비 중…" : null}
           analysisMode={prefs.analysis} onAnalysis={changeAnalysis}
