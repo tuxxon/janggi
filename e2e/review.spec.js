@@ -318,6 +318,26 @@ test("진행 중인 판의 복기에는 깊게 보기 줄이 없고, 저장된 �
   await expect(status(page)).toHaveText("복기 중 · 0/3수");
 });
 
+// 진행 중인 판의 복기는 지금 그대로(최종 리뷰 B 의 핀): "계속"이 그 국면을 깊게 보는 동안에도 후보에 깊이가 없고(스모크와 같은 모양),
+// 막대에 "같은 수"가 없고, 깊게 보기 줄도 멈춤도 없다.
+test("진행 중인 판의 복기는 지금 그대로다: 후보에 깊이가 없고, 막대에 '같은 수'가 없고, 깊게 보기 줄이 없다", async ({ page }) => {
+  await seed(page, [live, old], { analysis: "continuous" });
+  await expect(bar(page)).toHaveAttribute("data-cho-win", /\d/, { timeout: 60_000 });
+  await openGame(page, 0);
+  await expect(status(page)).toHaveText("복기 중 · 0/1수");
+  await expect(bar(page)).toContainText(/깊이 \d+ · 계속 분석 중/, { timeout: 30_000 });
+  const depthOf = async () => Number(/깊이 (\d+)/.exec(await bar(page).textContent())?.[1]);
+  const passDepth = await depthOf();
+  await expect.poll(depthOf, { timeout: 30_000 }).toBeGreaterThan(passDepth);   // 이 복기에서 깊게 보기의 결과가 왔다
+  expect(await bar(page).textContent()).not.toContain("같은 수");
+  await page.getByLabel("후보 수 보기").check();
+  await expect(page.getByTestId("candidates").locator("li").first()).toBeVisible({ timeout: 30_000 });
+  for (const text of await page.getByTestId("candidates").locator("li").allInnerTexts())
+    expect(text).toMatch(/^\d\. ((궁|차|포|마|상|사|졸|병) [a-i](10|[1-9])→[a-i](10|[1-9])|쉬기) \d+%$/);
+  await expect(capSelect(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "멈춤" })).toHaveCount(0);
+});
+
 test("깊게 보기 상한을 고른 뒤에도 ← → 로 복기를 움직인다(선택 상자가 초점을 놓는다)", async ({ page }) => {
   await seed(page, [live, old]);
   await openGame(page, 1);
