@@ -22,9 +22,9 @@
 | 기보 | 수마다 localStorage에 저장. 새로고침해도 이어진다. 복기(버튼·←→·수순·그래프, 빈 평가 자동 분석), JSON 내보내기·가져오기 |
 | 반복수 | 카카오식: 궁·사가 아닌 기물로 두 칸을 계속 오갈 수 없다(같은 수 세 번째 금지). 쉬기·잡기·장군이 끼면 다시 센다 |
 | 표시 | 판에 좌표(아래 a–i, 왼쪽 1–10). 후보 수·복기 수순·직전 수 줄에 한글 기물 이름("마 g1→f3") |
-| 분석 모드 | 설정의 "분석": 빠르게 0.8초 / 깊게 3초 / **계속**(기본, 보고 있는 국면을 최대 20초 계속 깊게). 즉시 적용, `janggi.prefs`에 기억. 엔진 스레드 = 코어의 절반(1~8), Hash 64MB, 최강 3초 |
+| 분석 모드 | 설정의 "분석": 빠르게 0.8초 / 깊게 3초 / **계속**(기본, 보고 있는 국면을 최대 20초 계속 깊게). 즉시 적용, `janggi.prefs`에 기억. 엔진 스레드 = 코어의 절반(1~8), Hash 64MB(저장된 판 복기의 깊게 보기가 1분 이상일 때만 256MB), 최강 3초. 저장된 판의 복기는 "깊게 보기"(MultiPV 1 · 20초/1분/5분/무제한, 5절) |
 | 반복수와 엔진 | 엔진도 카카오식 반복수를 안다: ini 변형 `janggikakao`(janggicasual + moveRepetitionIllegal) + 마지막 쉬기 이후 수순을 보냄. 예전엔 반복을 무승부로 읽어 지는 수를 권했다(사용자 보고) |
-| 테스트 | 단위 217개 · Playwright 40개(Chromium + WebKit 스모크) — main 에서 전부 초록 |
+| 테스트 | 단위 276개 · Playwright 48개(Chromium + WebKit 스모크) — 전부 초록(2026-09-30, 복기 깊게 보기 최종 리뷰 수정 뒤) |
 
 ## 2. 실행과 테스트
 
@@ -61,9 +61,11 @@ src/prefs.js           보기 설정 localStorage["janggi.prefs"] = { analysis: 
 src/Review.jsx         기보 목록, 복기 패널, 승률 그래프
 src/engineMove.js      원본 bestMove 루트 루프에서 막힌 수 하나를 뺀 버전
 src/analysis/service.js      UCI 서비스(주입된 엔진): 국면 대기열(빠짐없이 순서대로), 최강 우선, 초점 분석, 신경망 교체, 재시작 1회,
-                             분석 모드(setMode)와 깊게 보기(deepen, 선점·점진 결과·20초 상한)
+                             분석 모드(setMode)와 깊게 보기(deepen(ply, cap), 선점·점진 결과). cap null = 진행 중인 판과 그 복기
+                             (MultiPV 5 · 20초), cap 이 있으면 저장된 판 복기의 2단계(MultiPV 1 · 20초/1분/5분/무제한, 멈춤 haltDeepen,
+                             무제한은 isready 탐침, 1분 이상 Hash 256). 판이 바뀌면 sync 가 첫 탐색 전에 상한을 푼다
 src/analysis/gameAnalysis.js 판 ↔ 서비스 연결(analysisPositions{restrictions}, cacheEvaluation 병합, engineTurn)
-src/analysis/useAnalysis.js  React 훅(판별 캐시, known 평가 전달, setMode·deepen 효과)
+src/analysis/useAnalysis.js  React 훅(판별 캐시, known 평가 전달, setMode·deepen(k, deepCap) 효과, haltDeepen)
 src/analysis/fsf.js / nnue.js  WASM 로더(threadsFor, Hash 64), 사용자 신경망(크기+SHA-256 전체)
 vendor/coi-serviceworker.js  격리 서비스워커 수정본(MIT) — WebKit 304 처리
 scripts/vendor.mjs     public/ 으로 엔진 파일·SW·라이선스 고지 복사(dev/build 전에 자동)
@@ -97,7 +99,7 @@ e2e/                   smoke / review / settings / analysis .spec.js + helpers.j
 - **실측**(M3 Max, Chromium WASM, NNUE, 초반/중반 depth): MultiPV 5·1스레드·0.8초 11/13 → 4스레드·0.8초 12/15 → 8스레드·3초 17/20 → MultiPV 1·4스레드·3초 16/28. 기본 평가·7스레드 "계속"은 초기 국면 20초 동안 깊이 11 → 18.
 - **메모리**(리뷰어 실측, WASM 공유 힙, Hash 64): 1스레드 204MB · 2스레드 230 · 4스레드 382 · 7스레드 551 · 8스레드 661(예전 main 1스레드·Hash 32 는 184). 한 번 늘면 줄지 않는다.
 - **리뷰**(Opus×2, worktree): HIGH 없음. MED 는 모두 고쳤다 — 깊게 읽은 평가가 새로고침 뒤 얕아짐, 테스트 빈틈 4개(MultiPV 5·searchmoves·쉬는 엔진에서 deepen·한 차례 부호), 저메모리 기기 스레드(사용자 결정). "최강 국면을 다시 탐색한다"는 서비스 단독 재현이었고, 앱에서는 UCI 로그로 한 번만 탐색하는 걸 확인해서 고치지 않았다.
-- **복기 깊게 보기**(2026-09-30, spec 2.10 — 정본은 spec 7절): 진행 중인 판이 아닌 **저장된 판의 복기**에서만, 분석 모드가 계속일 때 1단계(MultiPV 5) 뒤 보고 있는 국면을 MultiPV 1 로 복기 패널 "깊게 보기"의 상한(20초 기본 · 1분 · 5분 · 무제한 = `go infinite`)까지 읽는다. 상한은 `janggi.prefs` 의 `reviewDeep` 에 기억한다. "멈춤"은 그 국면을 다 읽은 것으로 친다(상한을 바꾸면 다시 본다). 막대에 "같은 수 N깊이째", 후보마다 깊이를 적는다. 1분 이상이면 Hash 256(WASM 메모리는 새로고침 전까지 줄지 않는다). 무제한은 30초마다 `isready` 탐침으로 감시한다(탐색 중 readyok 는 브라우저에서도 온다 — e2e). 상한과 Hash 는 서비스 전체 값이라 앱이 저장된 판 복기를 떠날 때 `deepen(ply, null)` 로 푼다. 진행 중인 판과 그 복기는 지금 "계속" 그대로다(e2e 가 UCI 명령 기록으로 묶는다: MultiPV 5 · `go movetime 20000` · Hash 64).
+- **복기 깊게 보기**(2026-09-30, spec 2.10 — 정본은 spec 7절): 진행 중인 판이 아닌 **저장된 판의 복기**에서만, 분석 모드가 계속일 때 1단계(MultiPV 5) 뒤 보고 있는 국면을 MultiPV 1 로 복기 패널 "깊게 보기"의 상한(20초 기본 · 1분 · 5분 · 무제한 = `go infinite`)까지 읽는다. 상한은 `janggi.prefs` 의 `reviewDeep` 에 기억한다. "멈춤"은 그 국면을 다 읽은 것으로 친다(상한을 바꾸면 다시 본다). 막대에 "같은 수 N깊이째", 후보마다 깊이를 적는다. 1분 이상이면 Hash 256(WASM 메모리는 새로고침 전까지 줄지 않는다). 무제한은 30초마다 `isready` 탐침으로 감시한다(탐색 중 readyok 는 브라우저에서도 온다 — e2e). 상한과 Hash 는 서비스 전체 값이다: 판이 바뀌면 `sync` 가 그 판의 첫 탐색 전에 상한을 풀고(Hash 64), 저장된 판 복기면 뒤따르는 `deepen(k, cap)` 이 다시 건다(최종 리뷰 I1: 전에는 쉬고 있는 복기에서 나오면 진행 중인 판의 첫 탐색 — 최강의 수 포함 — 이 Hash 256 이었다). 다시 찾아간 국면도 2단계의 1순위·"같은 수"를 후보 1단계 깊이를 넘는 첫 줄부터 보여주고, 막대는 저장된 평가가 더 깊으면 그것을 둔다(개정 2.10 "다시 찾아간 국면"). 복기 패널의 "계속으로 바꾸기"로 그 자리에서 모드를 바꾼다. 진행 중인 판과 그 복기는 지금 "계속" 그대로다 — e2e 가 UCI 명령 기록으로 묶는다: 저장된 판 복기를 탐색 중에 떠나도 쉬는 중에 떠나도 진행 중인 판의 첫 `go` 는 Hash 64 · MultiPV 5, 그 복기는 MultiPV 5 · `go movetime 20000` · Hash 변경 없음. 화면도 묶는다: 진행 중인 판의 복기는 후보에 깊이가 없고 막대에 "같은 수"가 없고 깊게 보기 줄이 없다.
 
 ## 6. 그 뒤에 남은 것
 
