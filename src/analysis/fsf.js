@@ -39,12 +39,17 @@ export async function loadEngine({ onError = () => {} } = {}) {
 }
 
 // 엔진 스레드: 코어의 절반(1~8). 나머지는 화면과 원본 엔진(메인 스레드)에 남긴다.
-export const threadsFor = (cores) => Math.min(8, Math.max(1, Math.floor((cores || 0) / 2)));
+// 스레드마다 WASM 공유 메모리가 약 50~64MB 늘고 줄지 않는다(리뷰 B 실측: 1스레드 184MB, 7스레드 551MB).
+// 그래서 기기 메모리(deviceMemory, 크롬 계열만, GB)가 8 미만이면 메모리 GB ÷ 2 로 더 줄인다. 값이 없으면 코어 공식 그대로.
+export function threadsFor(cores, memory) {
+  const half = Math.min(8, Math.max(1, Math.floor((cores || 0) / 2)));
+  return memory > 0 && memory < 8 ? Math.min(half, Math.max(1, Math.floor(memory / 2))) : half;
+}
 
 export function createAnalyzer(options = {}) {
   const networks = createNetworkStore();
   const service = createAnalysisService({ createEngine: loadEngine, loadNetwork: () => networks.load(),
-    networkName: NNUE.name, threads: threadsFor(globalThis.navigator?.hardwareConcurrency), hash: 64, ...options });
+    networkName: NNUE.name, threads: threadsFor(globalThis.navigator?.hardwareConcurrency, globalThis.navigator?.deviceMemory), hash: 64, ...options });
   return { ...service,
     // Preserve the live accessor when wrapping the service.
     get status() { return service.status; },
