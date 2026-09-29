@@ -338,11 +338,13 @@ test("저장된 판 복기를 떠나면 상한·Hash 256 이 풀리고, 진행 �
   expect(saved.slice(0, long).filter(isHash).at(-1)).toBe("> setoption name Hash value 256");
   expect(saved.slice(0, long).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 1");
 
-  // 대국으로 돌아가면 서비스의 상한을 풀어(deepen(null, null)) Hash 가 64 로 한 번 돌아오고, 깊게 보기는 지금 "계속"이다.
+  // 60초 탐색이 달리는 중에 대국으로 돌아간다: 판이 바뀌면 서비스가 상한을 풀고, 멈춘 탐색의 bestmove 뒤 Hash 가 64 로 한 번
+  // 돌아온 다음 진행 중인 판의 첫 탐색이 돈다. 깊게 보기는 지금 "계속"이다. 엔진이 쉬고 있을 때 떠나는 경우는 다음 테스트.
   let mark = (await uci(page)).length;
   await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
   await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 20000"), { timeout: 30_000 }).toBe(true);
-  let after = (await uci(page)).slice(mark), deep = after.indexOf("> go movetime 20000");
+  let after = (await uci(page)).slice(mark), deep = after.indexOf("> go movetime 20000"), first = after.findIndex(isGo);
+  expect(after.slice(0, first).filter(isHash)).toEqual(["> setoption name Hash value 64"]);          // 첫 탐색 전에
   expect(after.slice(0, deep).filter(isHash)).toEqual(["> setoption name Hash value 64"]);
   expect(after.slice(0, deep).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
   expect(after.filter(isGo).filter((c) => !/^> go movetime (800|20000)$/.test(c))).toEqual([]);
@@ -356,6 +358,31 @@ test("저장된 판 복기를 떠나면 상한·Hash 256 이 풀리고, 진행 �
   expect(after.filter(isHash)).toEqual([]);
   expect(after.slice(0, deep).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
   expect(after.filter(isGo).filter((c) => !/^> go movetime (800|20000)$/.test(c))).toEqual([]);
+});
+
+// 최종 리뷰 A·B I1: 엔진이 쉬고 있으면 판이 바뀌자마자 진행 중인 판의 탐색이 시작된다 — 그 첫 탐색부터 Hash 64 · MultiPV 5.
+const lastBefore = (log, index, is) => log.slice(0, index).filter(is).at(-1);
+test("쉬고 있는 저장된 판 복기(1분, 멈춤 뒤)를 떠나도 진행 중인 판의 첫 탐색은 Hash 64 · MultiPV 5 다", async ({ page }) => {
+  await logUci(page);
+  await seed(page, [live, old], { analysis: "continuous" });
+  await openGame(page, 1);
+  await capSelect(page).selectOption("60000");
+  await expect.poll(async () => (await uci(page)).includes("> go movetime 60000"), { timeout: 30_000 }).toBe(true);
+  await page.getByRole("button", { name: "멈춤" }).click();
+  await expect.poll(async () => { const log = await uci(page), stop = log.lastIndexOf("> stop");
+    return stop > 0 && log.slice(stop).some((c) => c.startsWith("< bestmove")); }, { timeout: 15_000 }).toBe(true);
+  await page.waitForTimeout(500);
+  let log = await uci(page);
+  expect(log.slice(log.lastIndexOf("> stop")).filter(isGo)).toEqual([]);                       // 엔진이 쉰다
+  expect(lastBefore(log, log.length, isHash)).toBe("> setoption name Hash value 256");
+  const mark = log.length;
+  await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
+  await expect.poll(async () => (await uci(page)).slice(mark).some(isGo), { timeout: 30_000 }).toBe(true);
+  log = await uci(page);
+  const first = log.findIndex((c, i) => i >= mark && isGo(c));
+  expect(log[first]).toBe("> go movetime 800");
+  expect(lastBefore(log, first, isHash)).toBe("> setoption name Hash value 64");
+  expect(lastBefore(log, first, isMultiPV)).toBe("> setoption name MultiPV value 5");
 });
 
 test("무제한 깊게 보기는 첫 isready 탐침의 기한(30+15초)을 넘겨 계속되고(브라우저 엔진도 탐색 중 readyok 로 답한다), 멈춤으로 끝난다", async ({ page }) => {

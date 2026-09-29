@@ -1229,4 +1229,66 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     const { service } = setup({ mode: "continuous" });
     for (const cap of ["infinite", 30000, 0]) expect(() => service.deepen(0, cap)).toThrow("깊게 보기 상한");
   });
+
+  // 최종 리뷰 A·B I1: 저장된 판 복기를 떠나면 useAnalysis 는 한 커밋에서 sync(진행 중인 판) 다음에 deepen(null, null) 을 부른다.
+  // 엔진이 쉬고 있으면 sync 의 pump 가 곧바로 진행 중인 판의 첫 탐색(최강의 수일 수 있다)을 시작하므로, 판이 바뀌면 상한과
+  // Hash 256 은 그 첫 탐색 전에 풀려야 한다(개정 2.10 "진행 중인 판으로 돌아올 때").
+  const liveMax = [position(0, "c", { fen: "live-0" }), position(1, "h", { fen: "live-1", max: true })];
+  const idleExits = {
+    "after 멈춤": [60000, (engine, service) => { service.haltDeepen(); engine.emit("bestmove a4a5"); }],
+    "after a 1-min cap read to its end": [60000, (engine) => { engine.emit(line(20, 5)); engine.emit("bestmove a4a5"); }],
+    "after the unlimited look stopped at the engine's last depth (245)": [Infinity, (engine) => {
+      engine.emit("info depth 245 seldepth 6 multipv 1 score mate 3 nodes 100 pv a4a5 a7a6 b1c3"); engine.emit("bestmove a4a5"); }],
+  };
+  for (const [how, [cap, rest]] of Object.entries(idleExits)) {
+    it(`leaving an idle saved review ${how}: the live max move is searched with Hash 64`, async () => {
+      const { service, engine } = setup({ mode: "continuous", hash: 64 });
+      service.sync("saved", [position(0), position(1)]); service.deepen(0, cap); await service.ready;
+      firstPass(engine); await tick(); firstPass(engine); await tick();       // 두 국면의 1단계 → 0수째 2단계
+      expect(engine.commands.at(-1)).toBe(cap === Infinity ? "go infinite" : "go movetime 60000");
+      rest(engine, service); await tick();
+      expect(service.status).toMatchObject({ pending: 0, deepening: false });  // 엔진이 쉰다
+      expect(hashes(engine).at(-1)).toBe("setoption name Hash value 256");
+      const mark = engine.commands.length;
+      service.sync("live", liveMax); service.deepen(null, null); await tick(); // useAnalysis 의 효과 순서
+      expect(engine.commands.slice(mark)).toEqual(["setoption name Hash value 64", "isready",
+        "setoption name MultiPV value 1", "position fen live-1", "go movetime 3000"]);
+    });
+  }
+  it("leaving an idle saved review at its finished last ply (mate 0): the live game's first pass has Hash 64 and MultiPV 5", async () => {
+    const { service, engine } = setup({ mode: "continuous", hash: 64 });
+    service.sync("saved", [position(0), position(1)]); service.deepen(1, 300000); await service.ready;
+    firstPass(engine); await tick();
+    engine.emit("info depth 0 score mate 0"); engine.emit("bestmove (none)"); await tick(); // 끝난 판의 마지막 국면: 2단계 없음
+    expect(engine.searches).toEqual(["go movetime 800", "go movetime 800"]);
+    expect(service.status).toMatchObject({ pending: 0, deepening: false });
+    expect(hashes(engine)).toEqual(["setoption name Hash value 256"]);
+    const mark = engine.commands.length;
+    service.sync("live", [position(0, "c", { fen: "live-0" }), position(1, "h", { fen: "live-1" })]); service.deepen(null, null); await tick();
+    expect(engine.commands.slice(mark)).toEqual(["setoption name Hash value 64", "isready",
+      "setoption name MultiPV value 5", "position fen live-0", "go movetime 800"]);
+  });
+  it("a game switch while a long cap still searches: Hash 64 comes back after the stopped search, before the live game's first search", async () => {
+    const { service, engine } = await reviewing(300000, [position(0), position(1)]);
+    firstPass(engine); await tick();
+    expect(engine.commands.at(-1)).toBe("go movetime 300000");
+    service.sync("live", liveMax); service.deepen(null, null);
+    expect(engine.commands.at(-1)).toBe("stop");
+    engine.emit("bestmove a4a5"); await tick();
+    expect(afterStop(engine)).toEqual(["setoption name Hash value 64", "isready",
+      "setoption name MultiPV value 1", "position fen live-1", "go movetime 3000"]);
+  });
+  it("entering a saved review after the live game still deep-looks with its cap (the deepen effect follows the sync)", async () => {
+    const { service, engine } = setup({ mode: "continuous", hash: 64 });
+    service.sync("live", [position(0, "c", { fen: "live-0" })]); service.deepen(null, null); await service.ready;
+    engine.finish(); await tick();
+    expect(engine.commands.at(-1)).toBe("go movetime 20000");
+    service.sync("saved", [position(0), position(1)]); service.deepen(0, 60000);
+    engine.emit("bestmove a4a5"); await tick();
+    firstPass(engine); await tick(); firstPass(engine); await tick();
+    expect(afterStop(engine)).toEqual(["setoption name Hash value 256", "isready",
+      "setoption name MultiPV value 5", "position fen fen-0", "go movetime 800",
+      "setoption name MultiPV value 5", "position fen fen-1", "go movetime 800",
+      "setoption name MultiPV value 1", "position fen fen-0", "go movetime 60000"]);
+  });
 });

@@ -334,6 +334,9 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     ready,
     get status() { return status; },
     sync(id, positions) {
+      // 판이 바뀌면 상한(과 그것이 정하는 Hash 256)을 그 판의 첫 탐색 전에 푼다: 앱은 sync 뒤에 deepen 을 부르는데, 엔진이 쉬면
+      // 아래 pump 가 바로 새 판의 탐색(최강의 수일 수 있다)을 시작한다. 저장된 판 복기면 뒤따르는 deepen(k, cap) 이 다시 건다(최종 리뷰 I1).
+      if (id !== gameId) deepCap = null;
       let common = 0;
       // max 가 바뀐 국면(대국 중에 그 편을 최강 엔진으로 바꿈)도 새 국면으로 본다: 0.8초 분석 결과를 최강 수로 쓰지 않는다.
       if (id === gameId) while (common < entries.length && common < positions.length &&

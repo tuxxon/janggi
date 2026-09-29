@@ -43,7 +43,7 @@ export function useAnalysis(game, { mode = "fast", deepen = null, deepCap = null
   }, [game]);
   // 모드는 마운트 직후(엔진이 뜨기 전)에도 이 효과로 맞춘다. 동기화 뒤에 둔다: 새 판의 국면으로 깊게 볼 대상을 고른다.
   useEffect(() => { serviceRef.current.setMode(mode); }, [mode]);
-  // 상한은 서비스 전체 값이다: 저장된 판 복기를 떠나면(deepCap → null) 여기서 deepen(ply, null) 로 풀어 Hash 도 64 로 돌아간다.
+  // 상한은 서비스 전체 값이다: 판이 바뀌면 위의 sync 가 첫 탐색 전에 풀고(Hash 64), 저장된 판 복기면 여기서 deepen(k, cap) 으로 다시 건다.
   useEffect(() => { serviceRef.current.deepen(deepen, deepCap); }, [deepen, deepCap]);
   // Render immediately against the new game, even before the synchronization effect runs.
   const view = syncAnalysisCache(cache.id === game.id ? cache : cachesRef.current.get(game.id) ?? null, game);
