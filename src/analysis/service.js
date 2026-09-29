@@ -8,10 +8,11 @@ function info(line) {
   const score = /\bscore (cp|mate) (-?\d+)/.exec(line);
   const pv = /\bpv (\S+)/.exec(line), depth = /\bdepth (\d+)/.exec(line);
   const move = pv && uciToMove(pv[1]);
-  if (!score || !depth || (!move && !(score[1] === "mate" && Number(score[2]) === 0)) || /\b(?:lowerbound|upperbound)\b/.test(line)) return null;
+  if (!score || !depth || (!move && !(score[1] === "mate" && Number(score[2]) === 0))) return null;
   const value = { [score[1]]: Number(score[2]) };
+  // bound: lowerbound/upperbound — 정확하지 않은 점수. 평가(1순위)에는 쓰지 않고, 후보 묶음에서는 그 점수로 쓴다.
   return { rank: Number(/\bmultipv (\d+)/.exec(line)?.[1] ?? 1), depth: Number(depth[1]),
-    score: value, win: winFromScore(value),
+    score: value, win: winFromScore(value), bound: /\b(?:lowerbound|upperbound)\b/.test(line),
     candidate: move ? { move: moveToUci(move), ...value, win: winFromScore(value) } : null };
 }
 const deferred = () => {
@@ -172,10 +173,14 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     const { cp, mate, ...rest } = result;
     return { ...rest, ...(known.cp !== undefined ? { cp: known.cp } : { mate: known.mate }), win: known.win, depth: known.depth };
   }
-  // 순위별 줄 → 후보(순위순). 보통은 한 묶음(complete)이라 수가 겹치지 않는다. 완성된 묶음이 없을 때만 섞인 줄이 오므로
-  // 겹치면 앞 순위 것만 남긴다.
-  const candidatesOf = (lines) => [...lines].sort(([a], [b]) => a - b).map(([, v]) => v.candidate).filter(Boolean)
-    .filter((c, i, all) => all.findIndex((x) => x.move === c.move) === i);
+  // 순위별 마지막 줄 → 후보(순위순). 엔진은 반복(깊이)마다 1~N순위를 한 묶음으로 다 찍고 한 묶음 안의 수는 서로 다르다. 그때 보던
+  // 순위 한 줄은 lowerbound/upperbound 로 올 수 있다(멈출 때만이 아니라 끝난 반복에서도). 그 줄을 버리면 이전 묶음의 수가 남아
+  // 같은 수가 겹쳐 후보가 빠졌다(e2e 12번 중 1번) → bound 줄도 그 점수로 넣는다. 그러면 순위별 마지막 줄이 곧 마지막 묶음이다
+  // (리뷰 실측 366회: 마지막 묶음은 늘 순위가 다 있고 1순위가 bestmove). 1순위가 평가 줄(primary)과 같은 수면 평가 줄을 쓴다:
+  // 1순위가 bound 여도 목록과 승률 막대가 같게. 겹침 제거는 묶음이 덜 찍힌 경우를 위한 안전장치다.
+  const candidatesOf = (lines, primary) => [...lines].sort(([a], [b]) => a - b)
+    .map(([rank, v]) => (rank === 1 && primary?.candidate && v.candidate?.move === primary.candidate.move ? primary : v).candidate)
+    .filter(Boolean).filter((c, i, all) => all.findIndex((x) => x.move === c.move) === i);
   function receive(line) {
     if (typeof line !== "string") { void fail(line); return; }
     for (const waiter of [...waiters]) waiter.receive(line);
@@ -186,20 +191,15 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     }
     if (!active) return;
     const parsed = info(line);
-    // 엔진은 반복(깊이)마다 1~N순위를 한 묶음으로 찍고, 한 묶음 안의 수는 서로 다르다. 탐색이 반복 도중 멈추면 그때 보던
-    // 순위 한 줄이 lowerbound/upperbound 로 온다(info 가 버린다). 순위별 최신 줄을 섞으면 이전 묶음의 수가 끼어 같은 수가
-    // 겹치고 후보가 빠졌다(실측 0.8초 30번 중 2번) → 후보는 모든 순위가 정확한 마지막 묶음(complete)에서만 만든다.
-    const rank = /\bscore (?:cp|mate) /.test(line) ? Number(/\bmultipv (\d+)/.exec(line)?.[1] ?? 1) : 0;
-    if (rank === 1) active.batch = new Map();
-    if (rank) { active.batch?.set(rank, parsed); active.ranks = Math.max(active.ranks ?? 0, rank); }
-    if (parsed) active.lines.set(parsed.rank, parsed);
-    const completed = rank > 0 && rank === active.ranks && active.batch?.size === rank && [...active.batch.values()].every(Boolean);
-    if (completed) active.complete = active.batch;
-    // 깊게 보기는 점진 결과: 묶음이 완성됐을 때, 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
+    if (parsed) {
+      active.lines.set(parsed.rank, parsed); active.ranks = Math.max(active.ranks ?? 0, parsed.rank);
+      if (parsed.rank === 1 && !parsed.bound) active.primary = parsed; // 평가(점수·깊이)는 가장 최근의 정확한 1순위 줄
+    }
+    // 깊게 보기는 점진 결과: 묶음의 마지막 순위가 왔을 때, 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
     // (선점 뒤 다시 시작한 얕은 탐색이 표시를 되돌리지 않게).
-    const primary = active.lines.get(1);
-    if (completed && active.deepen && !active.cancelled && primary?.depth > active.entry.result.depth) {
-      active.entry.result = resultOf(active, primary, candidatesOf(active.complete), primary.candidate ? uciToMove(primary.candidate.move) : null);
+    const primary = active.primary;
+    if (parsed && parsed.rank === active.ranks && active.deepen && !active.cancelled && primary?.depth > active.entry.result.depth) {
+      active.entry.result = resultOf(active, primary, candidatesOf(active.lines, primary), primary.candidate ? uciToMove(primary.candidate.move) : null);
       onResult(active.entry.result);
     }
     if (!line.startsWith("bestmove ")) return;
@@ -209,12 +209,12 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     if (job.deepen) {
       if (!job.cancelled) job.entry.capped = true; // 상한까지 다 읽었다(선점으로 멈춘 것은 나중에 이어서 본다)
     } else if (!job.cancelled) {
-      const candidates = candidatesOf(job.complete ?? job.lines);
+      const candidates = candidatesOf(job.lines, job.primary);
       if (job.focus) {
         focus = null;
         job.focus.resolve(candidates.filter((c) => job.focus.moves.includes(c.move)));
       } else {
-        const { entry } = job, primary = job.lines.get(1), best = uciToMove(line.split(/\s+/)[1]);
+        const { entry, primary } = job, best = uciToMove(line.split(/\s+/)[1]);
         if (entry.max && !best) {
           entry.error = new Error("최강 엔진의 수를 읽을 수 없어요.");
           settle(entry, null, entry.error);

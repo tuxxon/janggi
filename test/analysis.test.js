@@ -364,32 +364,60 @@ describe("repetition-restricted positions (user request: Kakao Janggi)", () => {
   });
 });
 
-describe("candidates from an interrupted MultiPV iteration (found while checking Korean names)", () => {
-  // 실측(WASM 1.1.12, 초기 국면, 0.8초 MultiPV 5, 30번 중 2번): 멈춘 반복도 묶음은 1~5순위를 다 찍지만, 멈출 때 보던 순위
-  // 한 줄은 upperbound(정확하지 않은 점수)로 온다. 그 줄을 버리고 순위별 최신 줄을 섞으면 12수 3순위 g1f3 와 13수 2순위
-  // g1f3 가 겹쳐 후보가 4개가 됐다(e2e "후보 수 보기" 12번 중 1번 흔들림).
+describe("candidates from the engine's last batch (found while checking Korean names; review of 3dce1af)", () => {
+  // 엔진은 반복마다 1~N순위를 한 묶음으로 찍고, 한 묶음 안의 수는 서로 다르다. 그때 보던 순위 한 줄은 lowerbound/upperbound
+  // (정확하지 않은 점수)로 올 수 있다 — 멈출 때만이 아니라 끝난 반복에서도(리뷰 실측). bound 줄을 버리고 순위별 최신 줄을 섞으면
+  // 같은 수가 겹쳐 후보가 4개가 됐고(e2e 12번 중 1번), 모든 순위가 정확한 묶음으로 물러나면 1순위가 엔진이 둔 수와 달랐다
+  // (리뷰 A: 실엔진 366회 중 fast 3~5/90, deep 3/30). 엔진이 마지막에 찍은 묶음은 366번 모두 순위가 다 있고, 수가 안 겹치고,
+  // 1순위가 bestmove 였다 → 후보는 그 묶음 그대로(bound 줄은 그 점수로)다.
+  // 실측(WASM 1.1.12, 초기 국면, 0.8초 MultiPV 5): 13수 반복이 3순위를 보다 멈췄다.
   const stopped = [
     "info depth 12 seldepth 16 multipv 1 score cp 15 nodes 138267 pv b1c3 h10g8",
     "info depth 12 seldepth 15 multipv 2 score cp 14 nodes 138267 pv h1f4 a7b7",
     "info depth 12 seldepth 17 multipv 3 score cp 7 nodes 138267 pv g1f3 h10g8",
     "info depth 12 seldepth 15 multipv 4 score cp 7 nodes 138267 pv i4h4 c10d8",
     "info depth 12 seldepth 12 multipv 5 score cp 0 nodes 138267 pv a4b4 a7b7",
+    "info depth 13 currmove h1f4 currmovenumber 3",
     "info depth 13 seldepth 19 multipv 1 score cp 17 nodes 268969 pv b1c3 h10g8",
     "info depth 13 seldepth 15 multipv 2 score cp 15 nodes 268969 pv g1f3 h10g8",
     "info depth 13 seldepth 15 multipv 3 score cp 6 upperbound nodes 268969 pv h1f4 a7b7",
     "info depth 12 seldepth 15 multipv 4 score cp 7 nodes 268969 pv i4h4 c10d8",
     "info depth 12 seldepth 12 multipv 5 score cp 0 nodes 268969 pv a4b4 a7b7",
   ];
-  it("lists the last batch whose every rank is exact when the stopped batch carries a bound line", async () => {
+  it("lists the last printed batch, the bound rank included with its bound score (was 4 of 5)", async () => {
     const { service, engine, results } = setup();
     service.sync("g", [position(0)]); await service.ready;
     for (const l of stopped) engine.emit(l);
     engine.emit("bestmove b1c3 ponder h10g8"); await tick();
-    expect(results[0].candidates.map((c) => c.move)).toEqual(["b1c3", "h1f4", "g1f3", "i4h4", "a4b4"]);
-    expect(results[0].candidates.map((c) => c.cp)).toEqual([15, 14, 7, 7, 0]);
-    expect(results[0]).toMatchObject({ depth: 13, cp: 17 });                     // 평가는 가장 깊은 정확한 1순위
+    expect(results[0].candidates.map((c) => c.move)).toEqual(["b1c3", "g1f3", "h1f4", "i4h4", "a4b4"]);
+    expect(results[0].candidates.map((c) => c.cp)).toEqual([17, 15, 6, 7, 0]);
+    expect(results[0]).toMatchObject({ depth: 13, cp: 17, best: [82, 65] });
   });
-  it("a focus search keeps every destination when its stopped batch carries a bound line (real lines, 0.5 s MultiPV 3)", async () => {
+  it("the first candidate is the engine's move even when a lower rank is a bound (review A: deep 3 s, real lines)", async () => {
+    const { service, engine, results } = setup({ mode: "deep" });
+    service.sync("g", [position(0)]); await service.ready;
+    for (const l of [
+      "info depth 12 multipv 1 score cp 140 nodes 653698 pv a6d6 e7d7", "info depth 12 multipv 2 score cp 129 nodes 653698 pv a6a5 h10g8",
+      "info depth 12 multipv 3 score cp 88 nodes 653698 pv a6a2 c10d8", "info depth 12 multipv 4 score cp 88 nodes 653698 pv a6a3 c10d8",
+      "info depth 12 multipv 5 score cp 87 nodes 653698 pv a6a1 c10d8", "info depth 13 multipv 1 score cp 116 nodes 1302133 pv a6a5 c10d8",
+      "info depth 13 multipv 2 score cp 93 nodes 1302133 pv a6a2 c10d8", "info depth 13 multipv 3 score cp 90 nodes 1302133 pv a6a1 c10d8",
+      "info depth 13 multipv 4 score cp 68 nodes 1302133 pv a6a4 c10d8",
+      "info depth 13 multipv 5 score cp 50 upperbound nodes 1302133 pv a6d6 e7d7"]) engine.emit(l);
+    engine.emit("bestmove a6a5 ponder c10d8"); await tick();
+    expect(results[0].candidates.map((c) => c.move)).toEqual(["a6a5", "a6a2", "a6a1", "a6a4", "a6d6"]);
+    expect(results[0].candidates.map((c) => c.cp)).toEqual([116, 93, 90, 68, 50]);
+    expect(results[0]).toMatchObject({ depth: 13, cp: 116 });
+  });
+  it("a bound first rank of the evaluated move shows the evaluation line, so the list and the win bar agree (review B)", async () => {
+    const { service, engine, results } = setup();
+    service.sync("g", [position(0, "c", { max: true })]); await service.ready;
+    engine.emit("info depth 12 multipv 1 score cp 15 nodes 900 pv b1c3 h10g8");
+    engine.emit("info depth 13 multipv 1 score cp 40 lowerbound nodes 1800 pv b1c3 h10g8");
+    engine.emit("bestmove b1c3"); await tick();
+    expect(results[0]).toMatchObject({ depth: 12, cp: 15 });
+    expect(results[0].candidates).toEqual([{ move: "b1c3", cp: 15, win: results[0].win }]);
+  });
+  it("a focus search keeps every destination (real lines, 0.5 s MultiPV 3)", async () => {
     const { service, engine } = setup();
     service.sync("g", [position(0)]); await service.ready;
     engine.finish(); await tick();
@@ -398,17 +426,40 @@ describe("candidates from an interrupted MultiPV iteration (found while checking
       "info depth 12 multipv 3 score cp -66 pv c4c5", "info depth 13 multipv 1 score cp -32 pv c4d4",
       "info depth 13 multipv 2 score cp -60 pv c4c5", "info depth 13 multipv 3 score cp -65 upperbound pv c4b4"]) engine.emit(l);
     engine.emit("bestmove c4d4");
-    expect((await focus).map((c) => c.move)).toEqual(["c4d4", "c4b4", "c4c5"]);
+    expect((await focus).map((c) => [c.move, c.cp])).toEqual([["c4d4", -32], ["c4c5", -60], ["c4b4", -65]]);
   });
-  it("deepening does not report a stopped batch that carries a bound line", async () => {
+  it("deepening reports the batch that carries a bound rank once it is complete", async () => {
     const { service, engine, results } = setup({ mode: "continuous" });
     service.sync("g", [position(0)]); await service.ready;
     for (const l of stopped.slice(0, 5)) engine.emit(l);
-    engine.emit("bestmove b1c3"); await tick();                                   // 1차 결과: 12수 5개
+    engine.emit("bestmove b1c3"); await tick();                                   // 1차 결과: 12수
+    for (const l of stopped.slice(0, 5)) engine.emit(l.replace("depth 12", "depth 9")); // 깊게 보기의 얕은 묶음
     const before = results.length;
-    for (const l of stopped) engine.emit(l);                                      // 깊게 보기: 13수 묶음이 bound 를 품고 멈춤
+    for (const l of stopped.slice(5, 10)) engine.emit(l);                        // 13수: 4순위까지
     expect(results.length).toBe(before);
-    expect(results.at(-1).candidates).toHaveLength(5);
+    engine.emit(stopped[10]);                                                     // 5순위로 묶음 완성
+    expect(results.length).toBe(before + 1);
+    expect(results.at(-1)).toMatchObject({ depth: 13, cp: 17 });
+    expect(results.at(-1).candidates.map((c) => c.move)).toEqual(["b1c3", "g1f3", "h1f4", "i4h4", "a4b4"]);
+  });
+  it("deepening never reports a bound first rank as a deeper evaluation", async () => {
+    const { service, engine, results } = setup({ mode: "continuous" });
+    service.sync("g", [position(0)]); await service.ready;
+    for (const l of stopped.slice(0, 5)) engine.emit(l);
+    engine.emit("bestmove b1c3"); await tick();                                   // 1차 결과: 12수
+    for (const l of stopped.slice(0, 5)) engine.emit(l.replace("depth 12", "depth 9"));
+    const before = results.length;
+    engine.emit("info depth 13 multipv 1 score cp 40 lowerbound nodes 300000 pv b1c3 h10g8");
+    for (const l of stopped.slice(1, 5)) engine.emit(l);                          // 묶음 완성, 정확한 1순위는 아직 9수
+    expect(results.length).toBe(before);
+  });
+  it("without any complete batch the per-rank lines are used and a move is never listed twice", async () => {
+    const { service, engine, results } = setup();
+    service.sync("g", [position(0)]); await service.ready;
+    engine.emit("info depth 9 multipv 2 score cp 5 pv g1f3");
+    engine.emit("info depth 10 multipv 1 score cp 9 pv g1f3");
+    engine.emit("bestmove g1f3"); await tick();
+    expect(results[0].candidates.map((c) => c.move)).toEqual(["g1f3"]);
   });
 });
 
