@@ -878,19 +878,35 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     engine.emit(line(16, 50, "i1i2"));                                   // 1단계 5개 밖의 수: 1단계 5순위가 빠져 다섯 개
     expect(rows(results.at(-1).candidates)).toEqual([["i1i2", 50, 16], ["a4a5", 30, 13], ["b1c3", 20, 13], ["g1f3", 10, 13], ["c4c5", 5, 12]]);
   });
-  it("merges candidates: a ply with only a stored evaluation (no first stage) lists the second stage's first rank alone", async () => {
+  it("a ply with only a stored evaluation first gets the candidate pass (MultiPV 5, 800 ms, same searchmoves), keeps the deeper stored evaluation, then lists five", async () => {
     const { service, engine, results } = setup({ mode: "continuous", hash: 64 });
-    service.sync("g", [position(0, "c", { known: { cp: 12, win: 51.1, depth: 17 } }), position(1)]);
+    const roots = ["a4a5", "b1c3", "g1f3", "c4c5", "i4h4", "i1i2"];
+    service.sync("g", [position(0, "c", { known: { cp: 12, win: 51.1, depth: 17 }, searchmoves: roots }), position(1)]);
     service.deepen(0, 20000); await service.ready;
-    expect(engine.positions).toEqual(["position fen fen-1"]);             // 저장된 평가가 있는 지난 국면은 1단계를 건너뛴다
+    expect(engine.positions).toEqual(["position fen fen-1"]);             // 대기열은 저장된 평가가 있는 지난 국면을 건너뛴다
     firstPass(engine); await tick();
-    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 1", "position fen fen-0", "go movetime 20000"]);
+    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 5", "position fen fen-0",
+      `go movetime 800 searchmoves ${roots.join(" ")}`]);                  // 깊게 보기 전에 0수째의 1단계
+    expect(service.status.deepening).toBe(false);
+    firstPass(engine); await tick();
+    expect(results.at(-1)).toMatchObject({ ply: 0, cp: 12, win: 51.1, depth: 17, movetime: 800 }); // 저장된 17수 평가가 남는다
+    expect(rows(results.at(-1).candidates)).toEqual([["a4a5", 30, 13], ["b1c3", 20, 13], ["g1f3", 10, 13], ["c4c5", 5, 12], ["i4h4", 0, 12]]);
+    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 1", "position fen fen-0",
+      `go movetime 20000 searchmoves ${roots.join(" ")}`]);
     const before = results.length;
     engine.emit(line(17, 20, "b1c3"));
     expect(results.length).toBe(before);                                  // 저장된 깊이보다 깊어야 보낸다
     engine.emit(line(18, 25, "b1c3"));
     expect(results.at(-1)).toMatchObject({ ply: 0, depth: 18, cp: 25, deepCap: 20000 });
-    expect(rows(results.at(-1).candidates)).toEqual([["b1c3", 25, 18]]);
+    expect(rows(results.at(-1).candidates)).toEqual([["b1c3", 25, 18], ["a4a5", 30, 13], ["g1f3", 10, 13], ["c4c5", 5, 12], ["i4h4", 0, 12]]);
+  });
+  it("the live path (cap null) deepens a ply with only a stored evaluation directly, as before", async () => {
+    const { service, engine } = setup({ mode: "continuous", hash: 64 });
+    service.sync("g", [position(0, "c", { known: { cp: 12, win: 51.1, depth: 17 } }), position(1)]);
+    service.deepen(0, null); await service.ready;
+    firstPass(engine); await tick();
+    expect(engine.searches).toEqual(["go movetime 800", "go movetime 20000"]);
+    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 5", "position fen fen-0", "go movetime 20000"]);
   });
   it("counts the same first-rank move over new depths (N+1), restarts at 1 when it changes, and a same-depth line resets only on a change", async () => {
     const { engine, results } = await reviewing(20000);
@@ -922,6 +938,7 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     expect(results.length).toBe(before);                                  // 얕은 줄은 표시를 되돌리지 않는다
     engine.emit(line(16, 44, "a4a5"));
     expect(results.at(-1)).toMatchObject({ depth: 16, cp: 44, stable: 3, deepCap: 60000 });
+    expect(rows(results.at(-1).candidates)).toEqual([["a4a5", 44, 16], ["b1c3", 20, 13], ["g1f3", 10, 13], ["c4c5", 5, 12], ["i4h4", 0, 12]]);
   });
   it("a network change restarts the count and the first-stage list", async () => {
     const { service, engine, results } = await reviewing(20000);
@@ -1074,11 +1091,11 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
   });
   it("no probe after stop or bestmove", async () => {
     const { service, engine } = await unlimited();
-    await vi.advanceTimersByTimeAsync(40_000);
+    await vi.advanceTimersByTimeAsync(50_000);
     expect(probes(engine)).toBe(1);
-    service.haltDeepen();
+    service.haltDeepen();                                                    // 50초에 멈춤: bestmove 기한은 65초
     expect(engine.commands.at(-1)).toBe("stop");
-    await vi.advanceTimersByTimeAsync(10_000);                               // 다음 탐침 차례(60초)가 지나도
+    await vi.advanceTimersByTimeAsync(14_000);                               // 64초: 다음 탐침 차례(60초)가 지났다
     expect(afterStop(engine)).toEqual([]);
     engine.emit("bestmove a4a5"); await vi.advanceTimersByTimeAsync(120_000);
     expect(afterStop(engine)).toEqual([]);
@@ -1134,6 +1151,53 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     expect(engine.commands.at(-1)).toBe("go movetime 300000");               // 상한이 있으면 탐침이 없다
     await vi.advanceTimersByTimeAsync(2_000);
     expect(starts(engine)).toBe(2);
+  });
+  it("a stopped finite-cap deep look must answer bestmove within 15 s of the stop, not cap + 15 s", async () => {
+    vi.useFakeTimers();
+    const { service, engine } = setup({ mode: "continuous", hash: 64 });
+    service.sync("g", [position(0)]); service.deepen(0, 300000);
+    await vi.advanceTimersByTimeAsync(0); await service.ready;
+    firstPass(engine); await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    service.haltDeepen();
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(starts(engine)).toBe(1);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(starts(engine)).toBe(2);
+  });
+  it("the live path (cap null) keeps its 20 s + 15 s watchdog from the start of the search, even after a stop", async () => {
+    vi.useFakeTimers();
+    const { service, engine } = setup({ mode: "continuous", hash: 64 });
+    service.sync("g", [position(0)]); service.deepen(0, null);
+    await vi.advanceTimersByTimeAsync(0); await service.ready;
+    firstPass(engine); await vi.advanceTimersByTimeAsync(0);
+    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    await vi.advanceTimersByTimeAsync(10_000);
+    service.haltDeepen();
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(starts(engine)).toBe(1);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(starts(engine)).toBe(2);
+  });
+  it("an unlimited deep look that finishes the engine's last depth (245, a forced mate) stops and counts as read", async () => {
+    const { service, engine, results } = await reviewing(Infinity);
+    const mate = (depth, bound = "") => `info depth ${depth} seldepth 6 multipv 1 score mate 3${bound} nodes 100 pv a4a5 a7a6 b1c3`;
+    engine.emit(mate(244));
+    engine.emit(mate(245, " lowerbound"));                                  // 정확한 줄이 아니면 아직
+    expect(engine.commands.at(-1)).toBe("go infinite");
+    engine.emit(mate(245));                                                  // 엔진은 이 뒤로 stop 까지 코어를 돌리며 기다린다(실측)
+    expect(results.at(-1)).toMatchObject({ depth: 245, mate: 3, deepCap: Infinity });
+    expect(engine.commands.at(-1)).toBe("stop");
+    expect(service.status.deepening).toBe(false);
+    const count = engine.commands.length;
+    engine.emit("bestmove a4a5"); await tick();
+    service.deepen(0, Infinity); service.sync("g", [position(0)]); await tick();
+    expect(engine.commands).toHaveLength(count);                             // 다 읽었다: 다시 보지 않는다
+  });
+  it("a finite cap is not stopped at the last depth: the engine ends that search itself", async () => {
+    const { engine } = await reviewing(300000);
+    engine.emit("info depth 245 seldepth 6 multipv 1 score mate 3 nodes 100 pv a4a5 a7a6 b1c3");
+    expect(engine.commands.at(-1)).toBe("go movetime 300000");
   });
   it("Hash 256 needs the continuous mode: another mode keeps the constructor Hash; switching in raises it, switching out lowers it once when idle", async () => {
     const { service, engine } = setup({ mode: "fast", hash: 64 });

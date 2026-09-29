@@ -119,4 +119,21 @@ describe("review deep look on the real engine (spec 2.10)", () => {
       expect(sent.filter((c) => c.startsWith("go "))).toHaveLength(2);        // 멈춘 국면은 다시 보지 않는다
     } finally { service.dispose(); }
   }, 60_000);
+  it("the service ends an unlimited deep look by itself once the engine finishes its last depth (245) on a forced mate", async () => {
+    // 무작위 대국에서 찾은 외통 1수 국면(한 차례). 엔진은 245 깊이를 0.01초에 끝내고 stop 까지 코어를 돌리며 기다린다(보고서 M4).
+    const sent = [], results = [];
+    const engine = { postMessage: (c) => { sent.push(c); if (c !== "quit") sf.postMessage(c); }, FS: sf.FS,
+      addMessageListener: (fn) => sf.addMessageListener(fn), removeMessageListener: (fn) => sf.removeMessageListener(fn) };
+    const service = createAnalysisService({ createEngine: async () => engine, onResult: (r) => results.push(r), mode: "continuous", hash: 64 });
+    try {
+      service.sync("g", [{ ply: 0, turn: "h", fen: "5a3/2P6/3k2n2/9/9/2P4c1/b6b1/4KA3/4NA3/8p b - - 0 1" }]);
+      service.deepen(0, Infinity);
+      await service.ready;
+      await waitFor(() => sent.includes("go infinite") && sent.indexOf("stop") > sent.indexOf("go infinite"), 20_000); // 서비스가 스스로 멈춘다
+      await new Promise((resolve) => setTimeout(resolve, 500));                // bestmove 뒤에 다시 시작하지 않는지 본다
+      expect(service.status.deepening).toBe(false);
+      expect(sent.filter((c) => c.startsWith("go "))).toEqual(["go movetime 800", "go infinite"]);   // 다 읽었다: 다시 보지 않는다
+      expect(results.at(-1)).toMatchObject({ mate: -1, depth: 245 });           // 한이 1수에 이긴다(초 기준 mate −1)
+    } finally { service.dispose(); }
+  }, 60_000);
 });
