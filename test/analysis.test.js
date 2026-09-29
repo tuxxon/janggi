@@ -503,6 +503,31 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     await vi.advanceTimersByTimeAsync(2_000);        // 20초 + 15초가 지나도 bestmove 가 없으면 여전히 실패로 본다
     expect(starts()).toBe(2);
   });
+  it("continuous: with MultiPV, reports once the whole ranked batch of the deeper iteration has arrived (found in screenshots)", async () => {
+    const { service, engine, results } = setup({ mode: "continuous" });
+    service.sync("g", [position(0)]); await service.ready;
+    engine.emit(line(12, 30, "a4a5", 1)); engine.emit(line(12, 20, "b1c3", 2)); engine.emit(line(12, 10, "g1f3", 3));
+    engine.emit("bestmove a4a5"); await tick();                                     // 빠른 1차 결과(3순위까지)
+    for (const [rank, move] of [[1, "a4a5"], [2, "b1c3"], [3, "g1f3"]]) engine.emit(line(8, 0, move, rank)); // 깊게 보기의 얕은 묶음
+    const before = results.length;
+    engine.emit(line(13, 40, "b1c3", 1));                                          // 13수 반복의 1순위: 12수 2순위와 같은 수
+    expect(results.length).toBe(before);                                            // 아직 2·3순위는 12수 것 → 보내지 않는다
+    engine.emit(line(13, 35, "a4a5", 2)); engine.emit(line(13, 5, "g1f3", 3));
+    expect(results.length).toBe(before + 1);
+    expect(results.at(-1)).toMatchObject({ depth: 13, cp: 40, best: [82, 65] });
+    expect(results.at(-1).candidates.map((c) => c.move)).toEqual(["b1c3", "a4a5", "g1f3"]);
+  });
+  it("continuous: a partial batch (later ranks still one depth shallower, printed after 3 s) already reports the new depth", async () => {
+    const { service, engine, results } = setup({ mode: "continuous" });
+    service.sync("g", [position(0)]); await service.ready;
+    engine.emit(line(13, 30, "a4a5", 1)); engine.emit(line(13, 20, "b1c3", 2));   // 보여준 깊이 13
+    engine.emit("bestmove a4a5"); await tick();
+    engine.emit(line(9, 0, "a4a5", 1)); engine.emit(line(9, 0, "b1c3", 2));
+    const before = results.length;
+    engine.emit(line(14, 33, "a4a5", 1)); engine.emit(line(13, 21, "b1c3", 2));   // 1순위만 14수를 끝낸 묶음
+    expect(results.length).toBe(before + 1);
+    expect(results.at(-1)).toMatchObject({ depth: 14, cp: 33 });
+  });
   it("re-syncing the same positions does not interrupt deepening", async () => {
     const { service, engine } = setup({ mode: "continuous" });
     service.sync("g", [position(0)]); await service.ready;

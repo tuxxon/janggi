@@ -171,10 +171,13 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     }
     if (!active) return;
     const parsed = info(line);
-    if (parsed) active.lines.set(parsed.rank, parsed);
-    // 깊게 보기는 점진 결과: 1순위 줄이 지금 보여준 결과보다 깊을 때만 보낸다(선점 뒤 다시 시작한 얕은 탐색이 표시를 되돌리지 않게).
-    if (parsed?.rank === 1 && active.deepen && !active.cancelled && parsed.depth > active.entry.result.depth) {
-      active.entry.result = resultOf(active, parsed, candidatesOf(active.lines), parsed.candidate ? uciToMove(parsed.candidate.move) : null);
+    if (parsed) { active.lines.set(parsed.rank, parsed); active.ranks = Math.max(active.ranks ?? 0, parsed.rank); }
+    // 깊게 보기는 점진 결과: 엔진은 반복마다 1~N순위를 한 묶음으로 찍는다. 묶음의 마지막 순위가 왔을 때(1순위 줄만 새 깊이면
+    // 나머지가 이전 반복 것이라 같은 수가 겹쳐 후보가 빠진다), 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
+    // (선점 뒤 다시 시작한 얕은 탐색이 표시를 되돌리지 않게).
+    const primary = active.lines.get(1);
+    if (parsed && parsed.rank === active.ranks && active.deepen && !active.cancelled && primary?.depth > active.entry.result.depth) {
+      active.entry.result = resultOf(active, primary, candidatesOf(active.lines), primary.candidate ? uciToMove(primary.candidate.move) : null);
       onResult(active.entry.result);
     }
     if (!line.startsWith("bestmove ")) return;
