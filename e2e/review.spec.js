@@ -385,6 +385,7 @@ test("저장된 판 복기를 떠나면 상한·Hash 256 이 풀리고, 진행 �
   await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 20000"), { timeout: 30_000 }).toBe(true);
   let after = (await uci(page)).slice(mark), deep = after.indexOf("> go movetime 20000"), first = after.findIndex(isGo);
   expect(after.slice(0, first).filter(isHash)).toEqual(["> setoption name Hash value 64"]);          // 첫 탐색 전에
+  expect(after.slice(0, first).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
   expect(after.slice(0, deep).filter(isHash)).toEqual(["> setoption name Hash value 64"]);
   expect(after.slice(0, deep).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
   expect(after.filter(isGo).filter((c) => !/^> go movetime (800|20000)$/.test(c))).toEqual([]);
