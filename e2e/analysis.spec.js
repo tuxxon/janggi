@@ -14,7 +14,7 @@ const depthOf = async (page) => Number(/깊이 (\d+)/.exec(await bar(page).textC
 const modeSelect = (page) => page.getByLabel("분석", { exact: true });
 
 test("분석 선택지는 기본이 '계속'이고, 고른 모드는 새로고침해도 기억한다", async ({ page }) => {
-  await openIsolated(page, "/janggi/", { analysis: null });
+  await openIsolated(page, "/janggi/", { analysis: null, cores: null });
   await expect(modeSelect(page)).toHaveValue("continuous");
   await modeSelect(page).selectOption("deep");
   await page.reload();
@@ -23,7 +23,7 @@ test("분석 선택지는 기본이 '계속'이고, 고른 모드는 새로고�
 });
 
 test("계속: 깊이가 시간이 지나며 커지고 '계속 분석 중'을 보여주며, 빠르게로 바꾸면 바로 멈춘다", async ({ page }) => {
-  await openIsolated(page, "/janggi/", { analysis: "continuous" });
+  await openIsolated(page, "/janggi/", { analysis: "continuous", cores: null });
   await expect(bar(page)).toContainText("계속 분석 중", { timeout: 30_000 });
   const first = await depthOf(page);
   expect(first).toBeGreaterThan(0);
@@ -44,7 +44,7 @@ test("계속: 깊이가 시간이 지나며 커지고 '계속 분석 중'을 보
 });
 
 test("계속: 복기에서는 보고 있는 k수째 국면을 깊게 읽는다", async ({ page }) => {
-  await openIsolated(page, "/janggi/", { analysis: "continuous" });
+  await openIsolated(page, "/janggi/", { analysis: "continuous", cores: null });
   await page.evaluate((records) => {
     localStorage.clear();
     localStorage.setItem("janggi.prefs", JSON.stringify({ analysis: "continuous" }));
@@ -65,7 +65,7 @@ test("계속: 복기에서는 보고 있는 k수째 국면을 깊게 읽는다",
 });
 
 test("계속: 깊게 읽는 중에도 기물을 집으면 수마다 승률이 바로 뜨고, 수를 두면 새 국면을 바로 분석한다", async ({ page }) => {
-  await openIsolated(page, "/janggi/", { analysis: "continuous" });
+  await openIsolated(page, "/janggi/", { analysis: "continuous", cores: null });
   await page.getByLabel("위 두는 이", { exact: true }).selectOption("human"); // 엔진 응수가 끼지 않게 두 편 다 사람
   await expect(bar(page)).toContainText("계속 분석 중", { timeout: 30_000 });
   await page.getByLabel("후보 수 보기").check();
@@ -83,7 +83,7 @@ test("깊게 읽어 저장한 지금 국면의 평가는 새로고침 뒤 0.8초
     const [{ id }] = JSON.parse(localStorage.getItem("janggi.index"));
     return JSON.parse(localStorage.getItem(`janggi.game.${id}`)).analysis;
   });
-  await openIsolated(page, "/janggi/", { analysis: "continuous" });
+  await openIsolated(page, "/janggi/", { analysis: "continuous", cores: null });
   await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
   await expect(bar(page)).toContainText("계속 분석 중", { timeout: 30_000 });
   const first = await depthOf(page);

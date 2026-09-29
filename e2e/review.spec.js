@@ -187,7 +187,7 @@ test("다른 엔진 설정으로 만든 저장 평가는 새 결과가 와도 �
 test("@webkit WebKit(사파리·아이폰)에서도 격리되고 엔진 분석 결과가 나온다", async ({ page }) => {
   const errors = [];
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-  await openIsolated(page);
+  await openIsolated(page, "/janggi/", { cores: null });                  // 실제 코어 수: 여러 스레드(pthread 워커)가 WebKit 에서 뜨는지
   await expect(page.getByTestId("winbar")).toHaveAttribute("data-cho-win", /\d/, { timeout: 60_000 });
   expect(errors.filter((e) => /Cross-Origin-Embedder-Policy/.test(e))).toEqual([]);
 });
