@@ -633,3 +633,39 @@ describe("review A fixes (2026-09-29)", () => {
     expect(service.status.deepening).toBe(false);
   });
 });
+
+describe("review B test gaps (2026-09-29)", () => {
+  const line = (depth, cp, move = "a4a5", rank = 1) => `info depth ${depth} multipv ${rank} score cp ${cp} nodes 100 pv ${move}`;
+  const deepening = (engine) => { const go = engine.commands.lastIndexOf("go movetime 20000"); return engine.commands.slice(0, go + 1); };
+  it("deepens with MultiPV 5 so the hint list keeps five candidates", async () => {
+    const { service, engine } = setup({ mode: "continuous" });
+    service.sync("g", [position(0)]); await service.ready;
+    engine.finish(); await tick();
+    expect(deepening(engine).filter((c) => c.startsWith("setoption name MultiPV")).at(-1)).toBe("setoption name MultiPV value 5");
+  });
+  it("keeps the repetition restriction (searchmoves) while deepening", async () => {
+    const { service, engine } = setup({ mode: "continuous" });
+    service.sync("g", [position(0, "c", { searchmoves: ["a1a3", "e2e2"] })]); await service.ready;
+    engine.finish(); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 20000 searchmoves a1a3 e2e2");
+  });
+  it("deepen(other) starts deepening right away when the engine is idle after a capped ply", async () => {
+    const { service, engine } = setup({ mode: "continuous" });
+    service.sync("g", [position(0), position(1)]); await service.ready;
+    engine.finish(); await tick(); engine.finish(); await tick();
+    engine.emit("bestmove a4a5"); await tick();                              // 1수째는 상한까지 읽었다 → 엔진이 쉰다
+    const count = engine.searches.length;
+    service.deepen(0);
+    expect(engine.searches).toHaveLength(count + 1);
+    expect(engine.positions.at(-1)).toBe("position fen fen-0");
+  });
+  it("progressive results are in Cho's perspective when Han is to move", async () => {
+    const { service, engine, results } = setup({ mode: "continuous" });
+    service.sync("g", [position(0, "h")]); await service.ready;
+    engine.finish(0, "a7a6"); await tick();
+    engine.emit(line(20, 190, "a7a6"));
+    expect(results.at(-1)).toMatchObject({ depth: 20, cp: -190 });
+    expect(results.at(-1).win).toBeCloseTo(33.22, 1);
+  });
+});
+
