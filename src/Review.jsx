@@ -1,5 +1,6 @@
 // 복기 화면 부품: 기보 목록, 이동 버튼, 수순 목록, 승률 그래프. 계산은 review.js 가 한다.
 import { chartPoints, resultText } from "./review.js";
+import { REVIEW_DEEP } from "./prefs.js";
 
 const COL = { c: "#1b4a8c", h: "#ae2219" };
 const WHO = { human: "사람", engine: "엔진" };
@@ -8,6 +9,7 @@ const when = (iso) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 };
+const DEEP_LABEL = { 20000: "20초", 60000: "1분", 300000: "5분", infinite: "무제한" };
 const small = { padding: "6px 10px", borderRadius: 7, background: "#3a2c20", color: "#f8eed7", border: "none", fontSize: 13, cursor: "pointer" };
 
 export function GameList({ items, liveId, onOpen, onExport, onExportAll, onImport, error }) {
@@ -69,7 +71,8 @@ export function WinChart({ evals, k, onPick }) {
   );
 }
 
-export function ReviewPanel({ rows, k, n, setK, evals, onExit }) {
+// deep: 저장된 판 복기의 깊게 보기(개정 2.10) — { value, onChange, deepening, onHalt, continuous }. 진행 중인 판의 복기는 null.
+export function ReviewPanel({ rows, k, n, setK, evals, onExit, deep }) {
   const nav = [["처음", "⏮", 0], ["이전 수", "◀", k - 1], ["다음 수", "▶", k + 1], ["마지막 수", "⏭", n]];
   return (
     <div style={{ marginTop: 10 }}>
@@ -79,6 +82,16 @@ export function ReviewPanel({ rows, k, n, setK, evals, onExit }) {
             style={{ ...small, fontSize: 18, padding: "8px 0", opacity: to < 0 || to > n ? 0.4 : 1 }} onClick={() => setK(to)}>{icon}</button>
         ))}
       </div>
+      {deep && <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 8, fontSize: 13 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>깊게 보기
+          <select aria-label="깊게 보기" value={String(deep.value)} style={{ padding: "5px 6px", borderRadius: 7, border: "1.5px solid #4e3118", background: "#f3eee4", color: "#261d15", fontSize: 13 }}
+            onChange={(e) => deep.onChange(REVIEW_DEEP.find((v) => String(v) === e.target.value))}>
+            {REVIEW_DEEP.map((v) => <option key={v} value={v}>{DEEP_LABEL[v]}</option>)}
+          </select>
+        </label>
+        {deep.deepening && <button style={small} onClick={deep.onHalt}>멈춤</button>}
+        {!deep.continuous && <span style={{ color: "#65584a" }}>분석 모드가 '계속'일 때 깊게 봐요</span>}
+      </div>}
       <WinChart evals={Array.from({ length: n + 1 }, (_, i) => evals?.[i] ?? null)} k={k} onPick={setK} />
       <ol style={{ listStyle: "none", padding: 0, margin: "8px 0 0", maxHeight: 220, overflowY: "auto", fontSize: 13, background: "#e2dccf", borderRadius: 8 }}>
         {rows.map((r) => (

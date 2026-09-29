@@ -19,7 +19,7 @@ test("분석 선택지는 기본이 '계속'이고, 고른 모드는 새로고�
   await modeSelect(page).selectOption("deep");
   await page.reload();
   await expect(modeSelect(page)).toHaveValue("deep");
-  expect(await page.evaluate(() => localStorage.getItem("janggi.prefs"))).toBe('{"analysis":"deep"}');
+  expect(await page.evaluate(() => localStorage.getItem("janggi.prefs"))).toBe('{"analysis":"deep","reviewDeep":20000}');
 });
 
 test("계속: 깊이가 시간이 지나며 커지고 '계속 분석 중'을 보여주며, 빠르게로 바꾸면 바로 멈춘다", async ({ page }) => {

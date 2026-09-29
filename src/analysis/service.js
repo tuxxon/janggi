@@ -232,7 +232,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     .map(([rank, v]) => (rank === 1 && primary?.candidate && v.candidate?.move === primary.candidate.move ? primary : v).candidate)
     .filter(Boolean).filter((c, i, all) => all.findIndex((x) => x.move === c.move) === i);
   // 2단계 후보: 2단계의 1순위(평가 줄) + 1단계 목록에서 그 수를 뺀 것(1단계 순서·값·깊이 그대로). 1단계는 MultiPV 5 라
-  // 1순위가 1단계 5개 밖의 수면 1단계 5순위가 빠진다(2~5순위 = 1단계, 개정 2.10). 1단계가 없으면(저장된 평가만) 1순위 하나.
+  // 1순위가 1단계 5개 밖의 수면 1단계 5순위가 빠진다(2~5순위 = 1단계, 개정 2.10). 저장된 평가만 있던 국면(cached)도 pump 가
+  // 2단계 전에 1단계를 먼저 돌리므로 first 는 늘 있다 — `?? []` 는 안전장치일 뿐이다.
   const mergedCandidates = (first, primary) =>
     [primary.candidate, ...(first ?? []).filter((c) => c.move !== primary.candidate?.move)].filter(Boolean).slice(0, 5);
   // 같은 수 N깊이째: 2단계의 정확한 1순위 줄이 센 깊이보다 깊으면 같은 수는 N+1, 다른 수는 1. 같은 깊이에 다른 수가 오면 1.

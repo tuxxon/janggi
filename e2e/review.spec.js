@@ -11,8 +11,8 @@ const old = rec(OLD, "2026-09-27T10:00:00.000Z", { moves: ["a4a5", "a7a6", "c4c5
 // 진행 중인 판은 사람끼리: 엔진(한) 차례로 두면 열자마자·복기에서 돌아오자마자 420ms 뒤에 엔진이 둬서 판 비교가 경합한다.
 const live = rec(LIVE, "2026-09-28T10:00:00.000Z", { moves: ["e4e5"], controllers: { c: "human", h: "human" } });
 
-async function seed(page, records) {
-  await openIsolated(page);
+async function seed(page, records, options) {
+  await openIsolated(page, "/janggi/", options);
   await page.evaluate((records) => {
     localStorage.clear();
     for (const r of records) localStorage.setItem(`janggi.game.${r.id}`, JSON.stringify(r));
@@ -252,4 +252,132 @@ test("복기 훈수에서도 그 시점에 반복수로 막힌 수는 도착 칸
   const dotAt = (r, c) => page.locator(`svg circle[r="9"][cx="${40 + c * 60}"][cy="${40 + r * 60}"]`);
   await expect(dotAt(7, 0)).toHaveCount(1);                                      // a3 는 갈 수 있었다
   await expect(dotAt(8, 0)).toHaveCount(0);                                      // a2 는 그 시점에 반복수로 막혀 있었다
+});
+
+// ---- 복기 깊게 보기 (개정 2.10: 저장된 판 복기 전용) ----
+// UCI 기록: 앱이 엔진에 보낸 명령("> ...")과 엔진의 uciok·readyok·bestmove 줄("< ...")을 window.__uci 에 쌓는다.
+// stockfish.js 의 전역 var Stockfish 대입을 가로채 엔진의 postMessage 를 감싼다(pthread 워커는 건드리지 않는다).
+async function logUci(page) {
+  await page.addInitScript(() => {
+    const log = (window.__uci = []);
+    let wrapped;
+    Object.defineProperty(window, "Stockfish", { configurable: true, get: () => wrapped, set(real) {
+      wrapped = (options) => Promise.resolve().then(() => real(options)).then((engine) => {
+        const post = engine.postMessage.bind(engine);
+        engine.postMessage = (command) => { log.push(`> ${command}`); return post(command); };
+        engine.addMessageListener((line) => { if (/^(uciok|readyok|bestmove)\b/.test(line)) log.push(`< ${line}`); });
+        return engine;
+      });
+    } });
+  });
+}
+const uci = (page) => page.evaluate(() => window.__uci);
+const bar = (page) => page.getByTestId("winbar");
+const capSelect = (page) => page.getByLabel("깊게 보기", { exact: true });
+const openGame = async (page, nth) => {                   // 복기에서 돌아오면 목록이 열린 채다 → 닫혀 있을 때만 연다
+  const list = page.getByRole("button", { name: "기보" });
+  if (await list.getAttribute("aria-expanded") !== "true") await list.click();
+  await page.getByTestId("game-item").nth(nth).getByRole("button", { name: "복기" }).click();
+};
+const isHash = (c) => c.startsWith("> setoption name Hash "), isMultiPV = (c) => c.startsWith("> setoption name MultiPV "), isGo = (c) => c.startsWith("> go ");
+
+test("저장된 판 복기: 깊게 보기 20초로 '같은 수 N깊이째'가 뜨고 후보마다 깊이를 적으며, 멈춤 뒤 '계속 분석 중'이 사라진다", async ({ page }) => {
+  await seed(page, [live, old], { analysis: "continuous" });
+  await openGame(page, 1);
+  await expect(status(page)).toHaveText("복기 중 · 0/3수");
+  await expect(capSelect(page)).toHaveValue("20000");                           // 기본 20초
+  await expect(bar(page)).toContainText(/깊이 \d+ · 같은 수 \d+깊이째 · 계속 분석 중/, { timeout: 30_000 });
+  await page.getByLabel("후보 수 보기").check();
+  await expect(page.getByTestId("candidates").locator("li").first()).toContainText(/\d+% · 깊이 \d+/);
+  await page.getByRole("button", { name: "멈춤" }).click();
+  await expect(bar(page)).not.toContainText("계속 분석 중");
+  await expect(bar(page)).toContainText(/깊이 \d+ · 같은 수 \d+깊이째/);          // 멈춘 때까지의 결과는 남는다
+  await expect(page.getByRole("button", { name: "멈춤" })).toHaveCount(0);
+  await page.waitForTimeout(1_500);
+  await expect(bar(page)).not.toContainText("계속 분석 중");                    // 멈춘 국면은 다시 깊게 보지 않는다
+});
+
+test("진행 중인 판의 복기에는 깊게 보기 줄이 없고, 저장된 판 복기에는 있다(계속이 아니면 안내)", async ({ page }) => {
+  await seed(page, [live, old]);                                               // 분석 모드 빠르게
+  await openGame(page, 0);                                                     // 진행 중인 판
+  await expect(status(page)).toHaveText("복기 중 · 0/1수");
+  await expect(capSelect(page)).toHaveCount(0);
+  await expect(page.getByText("분석 모드가 '계속'일 때 깊게 봐요")).toHaveCount(0);
+  await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
+  await openGame(page, 1);                                                     // 저장된 판
+  await expect(status(page)).toHaveText("복기 중 · 0/3수");
+  await expect(capSelect(page)).toHaveCount(1);
+  await expect(page.getByText("분석 모드가 '계속'일 때 깊게 봐요")).toBeVisible();
+  await expect(page.getByRole("button", { name: "멈춤" })).toHaveCount(0);
+});
+
+test("깊게 보기 상한은 새로고침해도 기억한다", async ({ page }) => {
+  await seed(page, [live, old]);
+  await openGame(page, 1);
+  await capSelect(page).selectOption("60000");
+  expect(await page.evaluate(() => localStorage.getItem("janggi.prefs"))).toBe('{"analysis":"fast","reviewDeep":60000}');
+  await page.reload();
+  await openGame(page, 1);
+  await expect(capSelect(page)).toHaveValue("60000");
+  await capSelect(page).selectOption("infinite");
+  await page.reload();
+  await openGame(page, 1);
+  await expect(capSelect(page)).toHaveValue("infinite");
+  expect(await page.evaluate(() => localStorage.getItem("janggi.prefs"))).toBe('{"analysis":"fast","reviewDeep":"infinite"}');
+});
+
+test("저장된 판 복기를 떠나면 상한·Hash 256 이 풀리고, 진행 중인 판과 그 복기는 MultiPV 5 · 20초 · Hash 64 그대로다", async ({ page }) => {
+  await logUci(page);
+  await seed(page, [live, old], { analysis: "continuous" });
+  await expect.poll(async () => (await uci(page)).includes("< readyok"), { timeout: 30_000 }).toBe(true);
+  expect((await uci(page)).filter(isHash)).toEqual(["> setoption name Hash value 64"]); // 진행 중인 판: 시작 값 그대로
+  await openGame(page, 1);
+  await capSelect(page).selectOption("60000");
+  await expect.poll(async () => (await uci(page)).includes("> go movetime 60000"), { timeout: 30_000 }).toBe(true);
+  const saved = await uci(page), long = saved.indexOf("> go movetime 60000");
+  expect(saved.slice(0, long).filter(isHash).at(-1)).toBe("> setoption name Hash value 256");
+  expect(saved.slice(0, long).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 1");
+
+  // 대국으로 돌아가면 서비스의 상한을 풀어(deepen(null, null)) Hash 가 64 로 한 번 돌아오고, 깊게 보기는 지금 "계속"이다.
+  let mark = (await uci(page)).length;
+  await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
+  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 20000"), { timeout: 30_000 }).toBe(true);
+  let after = (await uci(page)).slice(mark), deep = after.indexOf("> go movetime 20000");
+  expect(after.slice(0, deep).filter(isHash)).toEqual(["> setoption name Hash value 64"]);
+  expect(after.slice(0, deep).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
+  expect(after.filter(isGo).filter((c) => !/^> go movetime (800|20000)$/.test(c))).toEqual([]);
+
+  // 진행 중인 판의 복기도 상한 없이 지금 "계속" 그대로(Hash 를 바꾸지 않는다).
+  mark = (await uci(page)).length;
+  await openGame(page, 0);
+  await expect(status(page)).toHaveText("복기 중 · 0/1수");
+  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 20000"), { timeout: 30_000 }).toBe(true);
+  after = (await uci(page)).slice(mark); deep = after.indexOf("> go movetime 20000");
+  expect(after.filter(isHash)).toEqual([]);
+  expect(after.slice(0, deep).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
+  expect(after.filter(isGo).filter((c) => !/^> go movetime (800|20000)$/.test(c))).toEqual([]);
+});
+
+test("무제한 깊게 보기는 첫 isready 탐침의 기한(30+15초)을 넘겨 계속되고(브라우저 엔진도 탐색 중 readyok 로 답한다), 멈춤으로 끝난다", async ({ page }) => {
+  await logUci(page);
+  await seed(page, [live, old], { analysis: "continuous" });
+  await openGame(page, 1);
+  await capSelect(page).selectOption("infinite");
+  await expect.poll(async () => (await uci(page)).includes("> go infinite"), { timeout: 30_000 }).toBe(true);
+  const started = Date.now();
+  const sinceGo = async () => { const log = await uci(page); return log.slice(log.indexOf("> go infinite")); };
+  // 서비스는 30초마다 isready 로 탐색 중인 엔진을 확인한다 — readyok 가 15초 안에 없으면 실패로 엔진을 다시 띄운다(quit·uci).
+  // Task 1 은 탐색 중 readyok 를 node WASM 에서만 쟀다. 여기서는 브라우저 엔진이 답하는지 보고, 실패 기한(45초)을 넘겨 기다린다.
+  await expect.poll(async () => {
+    const log = await sinceGo(), probe = log.indexOf("> isready");
+    return probe > 0 && log.indexOf("< readyok", probe) > probe;
+  }, { timeout: 60_000 }).toBe(true);
+  await page.waitForTimeout(Math.max(0, 46_000 - (Date.now() - started)));
+  await expect(bar(page)).toContainText("계속 분석 중");
+  expect((await sinceGo()).filter((c) => c === "> stop" || c === "> quit" || c.startsWith("< bestmove"))).toEqual([]); // 한 탐색이 이어진다
+  expect((await uci(page)).filter((c) => c === "> uci")).toHaveLength(1);                           // 엔진을 다시 띄우지 않았다
+  await page.getByRole("button", { name: "멈춤" }).click();
+  await expect(bar(page)).not.toContainText("계속 분석 중");
+  await expect.poll(async () => { const log = await sinceGo(), stop = log.indexOf("> stop");  // 멈춤 → stop → bestmove
+    return stop > 0 && log.slice(stop).some((c) => c.startsWith("< bestmove")); }, { timeout: 15_000 }).toBe(true);
 });

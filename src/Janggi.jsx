@@ -6,7 +6,7 @@ import { replay, toRecord } from "./record.js";
 import { reviewRows } from "./review.js";
 import { GameList, ReviewPanel } from "./Review.jsx";
 import { SettingsPanel } from "./Settings.jsx";
-import { loadPrefs, savePrefs } from "./prefs.js";
+import { loadPrefs, savePrefs, capOf } from "./prefs.js";
 import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, withWho } from "./seats.js";
 import { forbiddenMove } from "./repetition.js";
 import { toFen, moveToUci, describeMove } from "./notation.js";
@@ -49,10 +49,12 @@ function Piece({ p, x, y, selected, lifted }) {
 }
 
 // ---- 승률 분석 (Fairy-Stockfish WASM) ----
-export function WinBar({ a, status, fen }) {
+// stable: 저장된 판 복기의 2단계 결과면 "같은 수 N깊이째"의 N(개정 2.10), 아니면 null.
+export function WinBar({ a, status, fen, stable = null }) {
   const w = a?.win ?? null;
   const note = status.state === "disabled" ? status.reason : status.state === "loading" ? "엔진 준비 중…"
-    : status.pending ? `분석 중 (${status.pending}개 남음)` : a ? `깊이 ${a.depth}${status.deepening ? " · 계속 분석 중" : ""}` : "";
+    : status.pending ? `분석 중 (${status.pending}개 남음)`
+    : a ? `깊이 ${a.depth}${stable != null ? ` · 같은 수 ${stable}깊이째` : ""}${status.deepening ? " · 계속 분석 중" : ""}` : "";
   return (
     <div data-testid="winbar" data-nnue={status.nnue} data-cho-win={w != null ? w.toFixed(1) : ""} data-fen={a ? fen : ""} style={{ margin: "6px 0 4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700 }}>
@@ -69,6 +71,20 @@ export function WinBar({ a, status, fen }) {
   );
 }
 
+// 후보 목록. depth: 저장된 판 복기에서는 후보마다 깊이를 적는다 — 2단계 1순위와 1단계 후보는 깊이가 다른 점수다(개정 2.10).
+export function Candidates({ candidates, board, depth }) {
+  return (
+    <ol data-testid="candidates" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(125px, 1fr))", gap: 4, listStyle: "none", padding: 0, margin: "4px 0" }}>
+      {candidates.map((candidate, k) => (
+        <li key={candidate.move} style={{ background: "#e2dccf", borderRadius: 6, padding: "3px 6px", color: "#261d15" }}>
+          <span aria-hidden="true" style={{ color: "#65584a" }}>{k + 1}. </span>{describeMove(board, candidate.move)} <b>{Math.round(candidate.win)}%</b>
+          {depth && <span style={{ whiteSpace: "nowrap" }}>{` · 깊이 ${candidate.depth}`}</span>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export default function Janggi() {
   const [session] = useState(() => {
     const store = createStore();
@@ -78,7 +94,7 @@ export default function Janggi() {
   // 자리(위/아래)별 설정: 두는 이는 즉시, 나라·상차림은 새 게임부터. 난이도도 새 게임부터.
   const [seats, setSeats] = useState(() => seatsOf(g));
   const [level, setLevel] = useState(g.level);
-  const [prefs, setPrefs] = useState(() => loadPrefs()); // 보기 설정(분석 모드): 즉시 적용, 새로고침해도 기억
+  const [prefs, setPrefs] = useState(() => loadPrefs()); // 보기 설정(분석 모드·깊게 보기 상한): 즉시 적용, 새로고침해도 기억
   const [saveError, setSaveError] = useState(session.error);
   const [corrupted, setCorrupted] = useState(session.corrupted);
   const [sel, setSel] = useState(null);
@@ -98,7 +114,11 @@ export default function Janggi() {
   gRef.current = g;
   // 분석 대상: 복기 중이면 그 판(빈 평가를 자동으로 채운다), 아니면 진행 중인 판.
   // "계속" 모드는 보고 있는 국면을 깊게 본다: 복기면 k수째, 대국이면 마지막 국면.
-  const analysis = useAnalysis(review ? review.state : g, { mode: prefs.analysis, deepen: review ? review.k : null });
+  // 저장된 판(진행 중인 판이 아닌 판)의 복기만 2단계 깊게 보기(MultiPV 1 · 고른 상한, 개정 2.10). 진행 중인 판과 그 복기는
+  // null(지금 "계속" 그대로). 상한과 Hash 256 은 서비스 전체 값이라, 그 복기를 떠나면 null 로 되돌려야 한다.
+  const savedReview = !!review && review.record.id !== g.id;
+  const deepCap = savedReview ? capOf(prefs.reviewDeep) : null;
+  const analysis = useAnalysis(review ? review.state : g, { mode: prefs.analysis, deepen: review ? review.k : null, deepCap });
   const { serviceRef } = analysis;
 
   // 판에 그릴 국면: 진행 중인 판, 또는 복기 중인 판의 k수째.
@@ -298,6 +318,10 @@ export default function Janggi() {
     const next = { ...prefs, analysis: mode };
     setPrefs(next); savePrefs(next);
   }
+  function changeReviewDeep(reviewDeep) {
+    const next = { ...prefs, reviewDeep };
+    setPrefs(next); savePrefs(next);
+  }
   function restart() {
     setSel(null); setDrag(null); setCorrupted(null);
     setG(session.store.newGame({ ...nextGame(seats), level }));
@@ -317,6 +341,8 @@ export default function Janggi() {
   const lastMove = review ? rows[review.k - 1]?.label : previous && describeMove(previous.b, g.moves.at(-1)); // "졸 a4→a5"
   const lastEvaluation = delta === null ? null : `${lastSide === "c" ? "초" : "한"} ${lastMove} ${delta < 0 ? "−" : "+"}${Math.abs(delta).toFixed(0)}%p${grade(delta) ? " " + grade(delta) : ""}`;
   const viewEval = review ? analysis.evals?.[review.k] : analysis.evaluation;
+  const viewResult = review ? analysis.results?.[review.k] : null;
+  const stable = savedReview && viewResult?.deepCap !== undefined ? viewResult.stable : null; // 2단계 결과의 "같은 수 N깊이째"
   const candidates = hints ? (review ? analysis.results?.[review.k]?.candidates : analysis.current?.candidates) ?? [] : [];
   const focusCandidates = hints && focused?.game === fGame && focused.ply === fPly && focused.sel === sel ? focused.candidates : [];
   const turnWin = moverWin(viewEval, view.turn);
@@ -349,19 +375,13 @@ export default function Janggi() {
           <button style={{ fontSize: 12, padding: "2px 8px", borderRadius: 6, border: `1px solid ${COL.h}`, background: "#f8eed7", color: COL.h, cursor: "pointer" }}
             onClick={() => exportOne(g.id)}>지금 내보내기</button></div>}
         {corrupted && <div role="status" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>최근 기보 손상됨 — 새 게임을 시작했어요.</div>}
-        <WinBar a={viewEval} status={analysis.status} fen={toFen(view.b, view.turn)} />
+        <WinBar a={viewEval} status={analysis.status} fen={toFen(view.b, view.turn)} stable={stable} />
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
           <input type="checkbox" checked={hints} onChange={(e) => { setHints(e.target.checked); if (!e.target.checked && review) setSel(null); }} />후보 수 보기
         </label>
         {hints && <div style={{ fontSize: 12, color: "#65584a", marginTop: 4 }}>
           {view.turn === "c" ? "초" : "한"}가 둘 수 · 두는 쪽 승률
-          <ol data-testid="candidates" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(125px, 1fr))", gap: 4, listStyle: "none", padding: 0, margin: "4px 0" }}>
-            {candidates.map((candidate, k) => (
-              <li key={candidate.move} style={{ background: "#e2dccf", borderRadius: 6, padding: "3px 6px", color: "#261d15" }}>
-                <span aria-hidden="true" style={{ color: "#65584a" }}>{k + 1}. </span>{describeMove(view.b, candidate.move)} <b>{Math.round(candidate.win)}%</b>
-              </li>
-            ))}
-          </ol>
+          <Candidates candidates={candidates} board={view.b} depth={savedReview} />
           {!candidates.length && <span>상위 5수는 이 국면을 분석한 뒤에 보여요. 기물을 집으면 그 기물의 수마다 승률이 떠요.</span>}
         </div>}
         <Tray side={flip ? "c" : "h"} />
@@ -454,7 +474,9 @@ export default function Janggi() {
         </>}
       </main>
       <aside style={{ flex: "1 1 300px", maxWidth: 560, minWidth: 0 }}>
-        {review ? <ReviewPanel rows={rows} k={review.k} n={review.record.moves.length} setK={setK} evals={analysis.evals} onExit={exitReview} /> : <>
+        {review ? <ReviewPanel rows={rows} k={review.k} n={review.record.moves.length} setK={setK} evals={analysis.evals} onExit={exitReview}
+          deep={savedReview ? { value: prefs.reviewDeep, onChange: changeReviewDeep, deepening: analysis.status.deepening,
+            onHalt: analysis.haltDeepen, continuous: prefs.analysis === "continuous" } : null} /> : <>
         <SettingsPanel seats={seats} nowBottom={bottomOf(g)} pending={pendingOf(seats, level, g)} level={level}
           maxReason={analysis.status.state !== "ready" ? analysis.status.reason || "엔진 준비 중…" : null}
           analysisMode={prefs.analysis} onAnalysis={changeAnalysis}

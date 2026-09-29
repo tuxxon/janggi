@@ -1,7 +1,9 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import Janggi, { WinBar } from "../src/Janggi.jsx";
+import Janggi, { WinBar, Candidates } from "../src/Janggi.jsx";
+import { ReviewPanel } from "../src/Review.jsx";
+import { newGame } from "../src/game.js";
 
 const id = "2026-09-28T14-03-12-345";
 const record = { v: 1, id, createdAt: "2026-09-28T14:03:12.345Z", controllers: { c: "human", h: "human" },
@@ -126,5 +128,56 @@ describe("deeper analysis settings (user request 2026-09-29)", () => {
     expect(bar({ deepening: false })).toContain("깊이 18<");
     expect(bar({ deepening: false })).not.toContain("계속 분석 중");
     expect(bar({ pending: 2, deepening: false })).toContain("분석 중 (2개 남음)");
+  });
+});
+
+describe("review deep look (spec 2.10: saved-game review only)", () => {
+  const bar = (status, stable) => renderToStaticMarkup(createElement(WinBar, { a: { win: 55, depth: 18 }, fen: "f", stable,
+    status: { state: "ready", pending: 0, nnue: "on", ...status } }));
+  it("shows the same-move count of a stage-2 result on the win bar, and the old text otherwise", () => {
+    expect(bar({ deepening: true }, 4)).toContain("깊이 18 · 같은 수 4깊이째 · 계속 분석 중<");
+    expect(bar({ deepening: false }, 4)).toContain("깊이 18 · 같은 수 4깊이째<");
+    expect(bar({ deepening: true }, null)).toContain("깊이 18 · 계속 분석 중<");
+    expect(bar({ deepening: false })).toContain("깊이 18<");
+    expect(bar({ pending: 2, deepening: false }, 4)).toContain("분석 중 (2개 남음)<");
+  });
+
+  const panel = (deep) => renderToStaticMarkup(createElement(ReviewPanel, { rows: [], k: 0, n: 0, setK() {}, evals: [], onExit() {}, deep }));
+  const deep = (extra) => ({ value: 20000, deepening: false, continuous: true, onChange() {}, onHalt() {}, ...extra });
+  const capSelect = (html) => /<select[^>]*aria-label="깊게 보기"[^>]*>(.*?)<\/select>/.exec(html)?.[1];
+  it("offers 20 s / 1 min / 5 min / unlimited in the saved-game review, with the remembered cap selected", () => {
+    const options = capSelect(panel(deep({ value: 60000 })));
+    expect([...options.matchAll(/<option value="(\w+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]))
+      .toEqual([["20000", "20초"], ["60000", "1분"], ["300000", "5분"], ["infinite", "무제한"]]);
+    expect(options).toContain('<option value="60000" selected="">1분');
+    expect(capSelect(panel(deep({ value: "infinite" })))).toContain('<option value="infinite" selected="">무제한');
+  });
+  it("shows 멈춤 only while the deep look runs", () => {
+    expect(panel(deep({ deepening: true }))).toMatch(/<button[^>]*>멈춤<\/button>/);
+    expect(panel(deep({ deepening: false }))).not.toContain("멈춤");
+  });
+  it("says the deep look needs the continuous mode when another mode is chosen", () => {
+    expect(panel(deep({ continuous: false }))).toContain("분석 모드가 &#x27;계속&#x27;일 때 깊게 봐요");
+    expect(panel(deep({ continuous: true }))).not.toContain("분석 모드가");
+  });
+  it("has no deep-look row in the review of the live game", () => {
+    const html = panel(null);
+    expect(html).toContain("대국으로 돌아가기");
+    expect(html).not.toContain("깊게 보기");
+    expect(html).not.toContain("멈춤");
+    expect(html).not.toContain("분석 모드가");
+  });
+
+  const list = (depth) => renderToStaticMarkup(createElement(Candidates, { board: newGame().b, depth,
+    candidates: [{ move: "a4a5", win: 55.4, depth: 21 }, { move: "c4c5", win: 48, depth: 14 }] }));
+  it("writes each candidate's depth in the saved-game review list only", () => {
+    const saved = list(true);
+    // 깊이는 한 덩어리로 줄을 바꾼다(좁은 칸에서 "깊이"와 숫자가 갈리지 않게 — 스크린샷으로 확인).
+    expect(saved).toContain('<b>55%</b><span style="white-space:nowrap"> · 깊이 21</span></li>');
+    expect(saved).toContain('<b>48%</b><span style="white-space:nowrap"> · 깊이 14</span></li>');
+    const live = list(false);
+    expect(live).toContain("<b>55%</b></li>");
+    expect(live).toContain("<b>48%</b></li>");
+    expect(live).not.toContain("깊이");
   });
 });

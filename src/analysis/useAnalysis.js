@@ -3,7 +3,8 @@ import { createAnalyzer, ISOLATION_REASON } from "./fsf.js";
 import { analysisPositions, cacheEvaluation, syncAnalysisCache } from "./gameAnalysis.js";
 
 // mode: 분석 모드(fast·deep·continuous). deepen: 깊게 볼 국면(복기의 k수째), null 이면 마지막 국면.
-export function useAnalysis(game, { mode = "fast", deepen = null } = {}) {
+// deepCap: 저장된 판 복기의 2단계 상한(service DEEP_CAPS), null 이면 지금 "계속"(진행 중인 판과 그 복기).
+export function useAnalysis(game, { mode = "fast", deepen = null, deepCap = null } = {}) {
   const latest = useRef(game);
   latest.current = game;
   const serviceRef = useRef(null);
@@ -42,10 +43,11 @@ export function useAnalysis(game, { mode = "fast", deepen = null } = {}) {
   }, [game]);
   // 모드는 마운트 직후(엔진이 뜨기 전)에도 이 효과로 맞춘다. 동기화 뒤에 둔다: 새 판의 국면으로 깊게 볼 대상을 고른다.
   useEffect(() => { serviceRef.current.setMode(mode); }, [mode]);
-  useEffect(() => { serviceRef.current.deepen(deepen); }, [deepen]);
+  // 상한은 서비스 전체 값이다: 저장된 판 복기를 떠나면(deepCap → null) 여기서 deepen(ply, null) 로 풀어 Hash 도 64 로 돌아간다.
+  useEffect(() => { serviceRef.current.deepen(deepen, deepCap); }, [deepen, deepCap]);
   // Render immediately against the new game, even before the synchronization effect runs.
   const view = syncAnalysisCache(cache.id === game.id ? cache : cachesRef.current.get(game.id) ?? null, game);
   const ply = game.moves.length;
-  return { serviceRef, status, cacheId: view.id, cache: view.analysis, results: view.results, evals: view.analysis?.evals,
-    current: view.results[ply], evaluation: view.analysis?.evals[ply] };
+  return { serviceRef, status, haltDeepen: () => serviceRef.current?.haltDeepen(), cacheId: view.id, cache: view.analysis,
+    results: view.results, evals: view.analysis?.evals, current: view.results[ply], evaluation: view.analysis?.evals[ply] };
 }

@@ -56,7 +56,8 @@ src/winrate.js         cp→승률(lichess 체스 곡선, 추정치), moveDelta,
 src/review.js          복기 순수 계산(reviewRows, chartPoints, resultText)
 src/Janggi.jsx         화면(판 SVG·드래그·애니메이션은 원본). 왼쪽 판 열 + 오른쪽 패널(설정 또는 복기)
 src/Settings.jsx       설정 패널(자리별 나라·두는 이·상차림, 난이도, 분석 모드, "새 게임부터 적용" 알림)
-src/prefs.js           보기 설정 localStorage["janggi.prefs"] = { analysis: "fast"|"deep"|"continuous" } (기본 continuous)
+src/prefs.js           보기 설정 localStorage["janggi.prefs"] = { analysis: "fast"|"deep"|"continuous", reviewDeep: 20000|60000|300000|"infinite" }
+                       (기본 continuous · 20000)
 src/Review.jsx         기보 목록, 복기 패널, 승률 그래프
 src/engineMove.js      원본 bestMove 루트 루프에서 막힌 수 하나를 뺀 버전
 src/analysis/service.js      UCI 서비스(주입된 엔진): 국면 대기열(빠짐없이 순서대로), 최강 우선, 초점 분석, 신경망 교체, 재시작 1회,
@@ -96,6 +97,7 @@ e2e/                   smoke / review / settings / analysis .spec.js + helpers.j
 - **실측**(M3 Max, Chromium WASM, NNUE, 초반/중반 depth): MultiPV 5·1스레드·0.8초 11/13 → 4스레드·0.8초 12/15 → 8스레드·3초 17/20 → MultiPV 1·4스레드·3초 16/28. 기본 평가·7스레드 "계속"은 초기 국면 20초 동안 깊이 11 → 18.
 - **메모리**(리뷰어 실측, WASM 공유 힙, Hash 64): 1스레드 204MB · 2스레드 230 · 4스레드 382 · 7스레드 551 · 8스레드 661(예전 main 1스레드·Hash 32 는 184). 한 번 늘면 줄지 않는다.
 - **리뷰**(Opus×2, worktree): HIGH 없음. MED 는 모두 고쳤다 — 깊게 읽은 평가가 새로고침 뒤 얕아짐, 테스트 빈틈 4개(MultiPV 5·searchmoves·쉬는 엔진에서 deepen·한 차례 부호), 저메모리 기기 스레드(사용자 결정). "최강 국면을 다시 탐색한다"는 서비스 단독 재현이었고, 앱에서는 UCI 로그로 한 번만 탐색하는 걸 확인해서 고치지 않았다.
+- **복기 깊게 보기**(2026-09-30, spec 2.10 — 정본은 spec 7절): 진행 중인 판이 아닌 **저장된 판의 복기**에서만, 분석 모드가 계속일 때 1단계(MultiPV 5) 뒤 보고 있는 국면을 MultiPV 1 로 복기 패널 "깊게 보기"의 상한(20초 기본 · 1분 · 5분 · 무제한 = `go infinite`)까지 읽는다. 상한은 `janggi.prefs` 의 `reviewDeep` 에 기억한다. "멈춤"은 그 국면을 다 읽은 것으로 친다(상한을 바꾸면 다시 본다). 막대에 "같은 수 N깊이째", 후보마다 깊이를 적는다. 1분 이상이면 Hash 256(WASM 메모리는 새로고침 전까지 줄지 않는다). 무제한은 30초마다 `isready` 탐침으로 감시한다(탐색 중 readyok 는 브라우저에서도 온다 — e2e). 상한과 Hash 는 서비스 전체 값이라 앱이 저장된 판 복기를 떠날 때 `deepen(ply, null)` 로 푼다. 진행 중인 판과 그 복기는 지금 "계속" 그대로다(e2e 가 UCI 명령 기록으로 묶는다: MultiPV 5 · `go movetime 20000` · Hash 64).
 
 ## 6. 그 뒤에 남은 것
 
