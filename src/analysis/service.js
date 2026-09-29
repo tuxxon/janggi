@@ -115,9 +115,10 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   const deepenTarget = () => {
     const entry = deepenPly === null ? entries.at(-1) : entries.find((e) => e.ply === deepenPly);
     // 최강 차례는 깊게 보지 않는다(그 탐색이 곧 엔진의 수다). 1차 분석이 끝난 국면만. 끝난 국면(mate 0, 둘 수 없음)은
-    // 2단계로 보지 않는다: 엔진이 go infinite 에서 stop 을 기다리며 코어 하나를 계속 돌린다(실측, 개정 2.10).
+    // 2단계로 보지 않는다: 엔진이 go infinite 에서 stop 을 기다리며 코어 하나를 계속 돌린다(실측, 개정 2.10). 끝났는지는
+    // 후보 1단계의 줄 그대로(finished)로 본다 — 결과는 저장된 더 깊은 평가가 mate 0 을 가릴 수 있다(최종 리뷰 A m1).
     return mode === "continuous" && entry?.result && !entry.max && !entry.error && !entry.capped &&
-      (deepCap === null || entry.result.mate !== 0) ? entry : null;
+      (deepCap === null || !entry.finished) ? entry : null;
   };
   function cancelFocus() {
     if (!focus) return;
@@ -300,6 +301,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
           entry.result = keepDeeper(entry.known, resultOf(job, primary, candidates, best));
           entry.first = candidates; // 1단계 후보: 2단계 결과가 entry.result 를 덮어도 목록의 2~5순위로 쓴다
           entry.listDepth = primary.depth; // 목록 1순위의 깊이(저장된 평가가 더 깊어도 이 탐색의 줄): 2단계는 이보다 깊을 때 보낸다
+          entry.finished = primary.score.mate === 0; // 둘 수 없는 국면(keepDeeper 전의 줄로): 2단계로 보지 않는다
           onResult(entry.result);
           settle(entry, best);
         }

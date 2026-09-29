@@ -1253,6 +1253,19 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     expect(results.at(-1)).toMatchObject({ depth: 23, cp: 40, stable: 14 });
   });
 
+  // 최종 리뷰 A m1: 끝난 국면인지는 후보 1단계의 줄 그대로(keepDeeper 전)로 정한다 — 저장된 더 깊은 cp 가 mate 0 을 가려도.
+  it("a ply whose candidate pass says mate 0 gets no second stage even when a deeper stored cp keeps the bar", async () => {
+    const { service, engine, results } = setup({ mode: "continuous", hash: 64 });
+    service.sync("saved", [position(0, "c", { known: { cp: 30, win: 53, depth: 17 } }), position(1)]);
+    service.deepen(0, Infinity); await service.ready;
+    firstPass(engine); await tick();                                        // 1수째
+    expect(engine.searches).toEqual(["go movetime 800", "go movetime 800"]); // 0수째의 후보 1단계
+    engine.emit("info depth 0 score mate 0"); engine.emit("bestmove (none)"); await tick();
+    expect(results.at(-1)).toMatchObject({ ply: 0, cp: 30, depth: 17, candidates: [] });
+    expect(engine.searches).toEqual(["go movetime 800", "go movetime 800"]);
+    expect(service.status.deepening).toBe(false);
+  });
+
   // 최종 리뷰 A·B I1: 저장된 판 복기를 떠나면 useAnalysis 는 한 커밋에서 sync(진행 중인 판) 다음에 deepen(null, null) 을 부른다.
   // 엔진이 쉬고 있으면 sync 의 pump 가 곧바로 진행 중인 판의 첫 탐색(최강의 수일 수 있다)을 시작하므로, 판이 바뀌면 상한과
   // Hash 256 은 그 첫 탐색 전에 풀려야 한다(개정 2.10 "진행 중인 판으로 돌아올 때").
