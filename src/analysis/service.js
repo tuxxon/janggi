@@ -1,4 +1,5 @@
-// One UCI engine, an ordered position queue, and a lower-priority cancellable focus search.
+// One UCI engine, an ordered position queue, a lower-priority cancellable focus search,
+// and (in continuous mode) an idle, preemptible deepening search of the viewed ply.
 // No browser/WASM dependencies: createEngine supplies { postMessage, addMessageListener, FS }.
 import { uciToMove, moveToUci } from "../notation.js";
 import { winFromScore } from "../winrate.js";
@@ -18,19 +19,30 @@ const deferred = () => {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 };
+// 감시 타이머는 탐색 시간 + RESPONSE_TIMEOUT: 20초 깊게 보기가 "응답 없음"으로 끝나지 않게.
 const RESPONSE_TIMEOUT = 15000, NETWORK_TIMEOUT = 20000;
+export const MODES = ["fast", "deep", "continuous"];
+export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 20000, max: 3000, focus: 500 };
+function checkMode(mode) {
+  if (!MODES.includes(mode)) throw new Error(`알 수 없는 분석 모드예요: ${mode}`);
+  return mode;
+}
 // 저장된 신경망 불러오기(Cache Storage·dev fetch)가 끝나지 않아도 기본 평가로 시작한다.
 const settleWithin = (promise, ms) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
 
 export function createAnalysisService({ createEngine, loadNetwork = async () => null,
-  networkName = "janggi-9991472750de.nnue", onResult = () => {}, onStatus = () => {}, onReset = () => {} }) {
-  let engine, listener, gameId, entries = [], active = null, focus = null;
+  networkName = "janggi-9991472750de.nnue", onResult = () => {}, onStatus = () => {}, onReset = () => {},
+  threads = 1, hash = 32, mode = "fast" }) {
+  checkMode(mode);
+  // deepenPly: 깊게 볼 국면(null 이면 마지막 국면). capped: 20초 상한을 다 채운 국면(다시 깊게 보지 않는다).
+  let engine, listener, gameId, entries = [], active = null, focus = null, deepenPly = null;
   let available = false, disposed = false, failures = 0, generation = 0, timer;
   let network = null, networkChange = null, configuring = false;
   const waiters = new Set();
-  let status = { state: "loading", pending: 0, nnue: "off", reason: null };
+  let status = { state: "loading", pending: 0, nnue: "off", reason: null, deepening: false };
   function publish() {
-    status = { ...status, pending: entries.filter((e) => !e.result && !e.error).length };
+    status = { ...status, pending: entries.filter((e) => !e.result && !e.error).length,
+      deepening: !!(active?.deepen && !active.cancelled) };
     if (!disposed) onStatus(status);
   }
   const send = (command) => engine.postMessage(command);
@@ -52,6 +64,12 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       try { send("stop"); } catch (error) { void fail(error); }
     }
   }
+  const stopDeepening = () => { if (active?.deepen) stop(); };
+  const deepenTarget = () => {
+    const entry = deepenPly === null ? entries.at(-1) : entries.find((e) => e.ply === deepenPly);
+    // 최강 차례는 깊게 보지 않는다(그 탐색이 곧 엔진의 수다). 1차 분석이 끝난 국면만.
+    return mode === "continuous" && entry?.result && !entry.max && !entry.error && !entry.capped ? entry : null;
+  };
   function cancelFocus() {
     if (!focus) return;
     const old = focus;
@@ -112,12 +130,15 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     if (networkChange) { void configure(); return; }
     // 최강 엔진 차례는 밀린 지난 국면 분석보다 먼저 탐색한다(엔진이 수십 초 기다리지 않게). 나머지는 순서대로.
     const open = (e) => !e.result && !e.error;
+    // 우선순위: 최강 > 밀린 국면 > 초점 > 깊게 보기(할 일이 없을 때만).
     const entry = entries.find((e) => e.max && open(e)) ?? entries.find(open);
-    if (!entry && !focus) return;
-    const job = entry ? { entry, movetime: entry.max ? 1000 : 800 } : { entry: focus.entry, focus, movetime: 500 };
-    active = { ...job, gameId, lines: new Map(), cancelled: false };
+    const target = !entry && !focus && deepenTarget();
+    if (!entry && !focus && !target) return;
+    const job = entry ? { entry, movetime: entry.max ? MOVETIME.max : MOVETIME[mode] }
+      : focus ? { entry: focus.entry, focus, movetime: MOVETIME.focus } : { entry: target, deepen: true, movetime: MOVETIME.deepen };
+    active = { ...job, gameId, mode, lines: new Map(), cancelled: false };
     const gen = generation;
-    timer = setTimeout(() => { if (gen === generation) void fail(new Error("엔진 탐색 응답 시간이 초과됐어요.")); }, RESPONSE_TIMEOUT);
+    timer = setTimeout(() => { if (gen === generation) void fail(new Error("엔진 탐색 응답 시간이 초과됐어요.")); }, job.movetime + RESPONSE_TIMEOUT);
     try {
       // 최강 수는 MultiPV 1: 후보 5개를 함께 탐색하면 최선수에 쓸 시간이 나뉘어 약해진다(리뷰).
       send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : job.entry.max ? 1 : 5}`);
@@ -128,6 +149,18 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       publish();
     } catch (error) { void fail(error); }
   }
+  // 두는 쪽 기준 UCI 점수를 초 기준 결과로 바꾼다.
+  function resultOf(job, primary, candidates, best) {
+    const { entry } = job, sign = entry.turn === "c" ? 1 : -1, score = primary.score;
+    const kind = score.cp !== undefined ? "cp" : "mate";
+    return { gameId: job.gameId, fen: entry.fen, ply: entry.ply,
+      [kind]: score[kind] * sign || 0, win: sign === 1 ? primary.win : 100 - primary.win,
+      depth: primary.depth, candidates, best, nnue: status.nnue, movetime: job.movetime, mode: job.mode, threads };
+  }
+  // 순위별 마지막 줄을 모은다. 탐색이 반복 도중 멈추면 뒤 순위에 이전 깊이의 줄이 남아 같은 수가 두 번 들어갈 수 있다
+  // → 앞 순위(최신) 것만 남긴다.
+  const candidatesOf = (lines) => [...lines].sort(([a], [b]) => a - b).map(([, v]) => v.candidate).filter(Boolean)
+    .filter((c, i, all) => all.findIndex((x) => x.move === c.move) === i);
   function receive(line) {
     if (typeof line !== "string") { void fail(line); return; }
     for (const waiter of [...waiters]) waiter.receive(line);
@@ -139,15 +172,19 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     if (!active) return;
     const parsed = info(line);
     if (parsed) active.lines.set(parsed.rank, parsed);
+    // 깊게 보기는 점진 결과: 1순위 줄이 지금 보여준 결과보다 깊을 때만 보낸다(선점 뒤 다시 시작한 얕은 탐색이 표시를 되돌리지 않게).
+    if (parsed?.rank === 1 && active.deepen && !active.cancelled && parsed.depth > active.entry.result.depth) {
+      active.entry.result = resultOf(active, parsed, candidatesOf(active.lines), parsed.candidate ? uciToMove(parsed.candidate.move) : null);
+      onResult(active.entry.result);
+    }
     if (!line.startsWith("bestmove ")) return;
     clearTimeout(timer);
     const job = active;
     active = null;
-    if (!job.cancelled) {
-      // 순위별 마지막 줄을 모은다. 탐색이 반복 도중 멈추면 뒤 순위에 이전 깊이의 줄이 남아 같은 수가 두 번 들어갈 수 있다
-      // → 앞 순위(최신) 것만 남긴다.
-      const candidates = [...job.lines].sort(([a], [b]) => a - b).map(([, v]) => v.candidate).filter(Boolean)
-        .filter((c, i, all) => all.findIndex((x) => x.move === c.move) === i);
+    if (job.deepen) {
+      if (!job.cancelled) job.entry.capped = true; // 상한까지 다 읽었다(선점으로 멈춘 것은 나중에 이어서 본다)
+    } else if (!job.cancelled) {
+      const candidates = candidatesOf(job.lines);
       if (job.focus) {
         focus = null;
         job.focus.resolve(candidates.filter((c) => job.focus.moves.includes(c.move)));
@@ -159,11 +196,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
         } else if (!primary) {
           void fail(new Error("엔진이 평가 점수를 보내지 않았어요.")); return;
         } else {
-          const sign = entry.turn === "c" ? 1 : -1, score = primary.score;
-          const kind = score.cp !== undefined ? "cp" : "mate";
-          entry.result = { gameId: job.gameId, fen: entry.fen, ply: entry.ply,
-            [kind]: score[kind] * sign || 0, win: sign === 1 ? primary.win : 100 - primary.win,
-            depth: primary.depth, candidates, best, nnue: status.nnue, movetime: job.movetime };
+          entry.result = resultOf(job, primary, candidates, best);
           onResult(entry.result);
           settle(entry, best);
         }
@@ -183,8 +216,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       await exchange("uci", "uciok");
       if (gen !== generation || disposed) return;
       send("setoption name UCI_Variant value janggicasual");
-      send("setoption name Threads value 1");
-      send("setoption name Hash value 32");
+      send(`setoption name Threads value ${threads}`);
+      send(`setoption name Hash value ${hash}`);
       writeNetwork();
       await exchange("isready", "readyok");
       if (gen !== generation || disposed) return;
@@ -209,7 +242,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
         !!entries[common].max === !!positions[common].max &&
         String(entries[common].searchmoves ?? "") === String(positions[common].searchmoves ?? "")) common++;
       const changed = id !== gameId || common !== entries.length || common !== positions.length;
-      if (changed) cancelFocus();
+      if (changed) { cancelFocus(); stopDeepening(); } // 새 수가 붙어도 깊게 보기는 멈추고 새 국면부터 본다
       if (common < entries.length || id !== gameId) stop();
       for (const entry of entries.slice(common)) settle(entry, null);
       // Preserve completed/in-flight max work when that ply becomes history.
@@ -237,9 +270,22 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       if (!entry || !moves.length || disposed || status.state === "disabled") return Promise.resolve(null);
       focus = { ...deferred(), entry, moves: [...new Set(moves)] };
       const promise = focus.promise;
-      pump(); return promise;
+      stopDeepening(); pump(); return promise;
     },
     cancelFocus,
+    setMode(next) {
+      if (checkMode(next) === mode) return;
+      mode = next;
+      for (const entry of entries) entry.capped = false;
+      if (mode !== "continuous") stopDeepening();
+      publish(); pump();
+    },
+    // 복기에서 보고 있는 국면을 깊게 본다. null 이면 마지막 국면(대국).
+    deepen(ply) {
+      deepenPly = ply ?? null;
+      if (active?.deepen && active.entry !== deepenTarget()) stop();
+      pump();
+    },
     setNetwork(bytes, name = networkName) {
       if (status.state === "disabled") return Promise.reject(new Error(status.reason));
       cancelFocus();
@@ -247,7 +293,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       networkChange?.resolve();
       networkChange = deferred();
       const promise = networkChange.promise;
-      for (const entry of entries) { entry.result = null; entry.error = null; }
+      for (const entry of entries) { entry.result = null; entry.error = null; entry.capped = false; }
       onReset();
       stop(); publish(); pump();
       return promise;
