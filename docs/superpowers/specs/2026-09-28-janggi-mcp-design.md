@@ -234,7 +234,7 @@ touchizen.com/janggi/  (GitHub Pages, 정적)
 ### 로딩 (`src/analysis/`)
 
 - `crossOriginIsolated`가 false면 분석을 끄고 "이 브라우저에서는 승률 분석을 쓸 수 없어요(교차 출처 격리 안 됨)"를 보여준다.
-- 엔진은 `public/fsf/stockfish.js`를 로드해서 띄운다. 설정은 `UCI_Variant=janggicasual`, `MultiPV=5`, `Hash=64`, `Threads = clamp(floor(navigator.hardwareConcurrency / 2), 1, 8)`(개정 2.9, 원래 1). 기기 메모리(`navigator.deviceMemory`, 크롬 계열만)가 8GB 미만이면 `max(1, floor(메모리GB / 2))`로 더 줄인다: 스레드마다 WASM 공유 메모리가 약 50~64MB 늘고 줄지 않는다(리뷰 실측 1스레드 184MB, 7스레드 551MB, 사용자 결정 2026-09-29).
+- 엔진은 `public/fsf/stockfish.js`를 로드해서 띄운다. 설정은 `UCI_Variant=janggicasual`, `MultiPV=5`, `Hash=64`, `Threads = clamp(floor(navigator.hardwareConcurrency / 2), 1, 8)`(개정 2.9, 원래 1). 기기 메모리(`navigator.deviceMemory`, 크롬 계열만)가 8GB 미만이면 `max(1, floor(메모리GB / 2))`로 더 줄인다: 스레드마다 WASM 공유 메모리가 약 50~64MB 늘고 줄지 않는다(리뷰 실측, Hash 64: 1스레드 204MB, 4스레드 382MB, 7스레드 551MB, 사용자 결정 2026-09-29).
 - **신경망**
   - 신경망 출처는 이 순서로 찾는다: Cache Storage(사용자가 넣은 파일) → dev 전용 경로 → 없음(기본 평가).
   - 적용 여부는 엔진 출력에 `NNUE evaluation using … enabled`가 나오는지로 판정한다.
