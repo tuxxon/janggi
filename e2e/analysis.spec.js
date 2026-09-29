@@ -77,3 +77,22 @@ test("계속: 깊게 읽는 중에도 기물을 집으면 수마다 승률이 �
   await expect(bar(page)).toHaveAttribute("data-fen", after, { timeout: 5_000 }); // 새 국면의 평가가 곧 뜬다
   await expect(bar(page)).toContainText("계속 분석 중", { timeout: 10_000 });     // 그리고 그 국면을 다시 깊게 읽는다
 });
+
+test("깊게 읽어 저장한 지금 국면의 평가는 새로고침 뒤 0.8초 탐색에 얕아지지 않는다 (리뷰 A F1)", async ({ page }) => {
+  const saved = () => page.evaluate(() => {
+    const [{ id }] = JSON.parse(localStorage.getItem("janggi.index"));
+    return JSON.parse(localStorage.getItem(`janggi.game.${id}`)).analysis;
+  });
+  await openIsolated(page, "/janggi/", { analysis: "continuous" });
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
+  await expect(bar(page)).toContainText("계속 분석 중", { timeout: 30_000 });
+  const first = await depthOf(page);
+  await expect.poll(async () => (await saved())?.evals[0]?.depth, { timeout: 25_000 }).toBeGreaterThanOrEqual(first + 3);
+  const deep = (await saved()).evals[0].depth;
+  await modeSelect(page).selectOption("fast");                     // 새로고침 뒤에는 다시 깊게 읽지 않는다
+  await page.reload();
+  await expect(bar(page)).toContainText("깊이", { timeout: 30_000 });
+  await page.waitForTimeout(3_000);                                 // 지금 국면은 후보 때문에 0.8초 다시 탐색한다
+  expect((await saved()).evals[0].depth).toBeGreaterThanOrEqual(deep);
+  expect(await depthOf(page)).toBeGreaterThanOrEqual(deep);
+});

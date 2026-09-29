@@ -576,3 +576,60 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     expect(() => service.setMode("slow")).toThrow("분석 모드");
   });
 });
+
+describe("review A fixes (2026-09-29)", () => {
+  const line = (depth, cp, move = "a4a5", rank = 1) => `info depth ${depth} multipv ${rank} score cp ${cp} nodes 100 pv ${move}`;
+  const known = { cp: 40, win: 55, depth: 22 };
+  it("F1: keeps a deeper stored evaluation of the searched last ply and refreshes only candidates and best move", async () => {
+    const { service, engine, results } = setup();
+    service.sync("g", [position(0, "c", { known: { cp: 12, win: 51.1, depth: 17 } }), position(1, "h", { known })]);
+    await service.ready;
+    expect(engine.positions).toEqual(["position fen fen-1"]);
+    engine.finish(-30, "a7a6"); await tick();                                 // 800ms 1차 탐색: 깊이 12
+    expect(results[0]).toMatchObject({ ply: 1, cp: 40, win: 55, depth: 22, best: [27, 36] });
+    expect(results[0].candidates).toEqual([{ move: "a7a6", cp: -30, win: expect.any(Number) }]);
+    expect(results[0]).not.toHaveProperty("mate");
+  });
+  it("F1: a fresh mate score shallower than a stored cp evaluation leaves no mate field behind", async () => {
+    const { service, engine, results } = setup();
+    service.sync("g", [position(0, "c", { known })]); await service.ready;
+    engine.emit("info depth 12 multipv 1 score mate 2 nodes 100 pv a4a5"); engine.emit("bestmove a4a5"); await tick();
+    expect(results[0]).toMatchObject({ cp: 40, win: 55, depth: 22 });
+    expect(results[0]).not.toHaveProperty("mate");
+  });
+  it("F1: a fresh result deeper than the stored one replaces it", async () => {
+    const { service, engine, results } = setup();
+    service.sync("g", [position(0, "c", { known: { mate: 3, win: 100, depth: 5 } })]); await service.ready;
+    engine.finish(15); await tick();
+    expect(results[0]).toMatchObject({ cp: 15, depth: 12 });
+    expect(results[0]).not.toHaveProperty("mate");
+  });
+  it("F1: continuous deepening of that ply reports only beyond the stored depth", async () => {
+    const { service, engine, results } = setup({ mode: "continuous" });
+    service.sync("g", [position(0, "c", { known })]); await service.ready;
+    engine.finish(0); await tick();
+    const before = results.length;
+    engine.emit(line(20, 1)); expect(results.length).toBe(before);
+    engine.emit(line(23, 2)); expect(results.at(-1)).toMatchObject({ depth: 23, cp: 2 });
+  });
+  it("F1: after a network change the stored evaluation no longer holds back the new one", async () => {
+    const { service, engine, results } = setup();
+    service.sync("g", [position(0, "c", { known })]); await service.ready;
+    engine.finish(0); await tick();
+    await service.setNetwork(null); await tick();
+    engine.finish(7); await tick();
+    expect(results.at(-1)).toMatchObject({ cp: 7, depth: 12 });
+  });
+  it("F3: preempting deepening with focus() or deepen(other) clears the status at once", async () => {
+    const { service, engine } = setup({ mode: "continuous" });
+    service.sync("g", [position(0), position(1)]); await service.ready;
+    engine.finish(); await tick(); engine.finish(); await tick();
+    expect(service.status.deepening).toBe(true);
+    service.deepen(0);
+    expect(service.status.deepening).toBe(false);
+    engine.emit("bestmove a4a5"); await tick();
+    expect(service.status.deepening).toBe(true);                             // 0수째를 깊게 본다
+    void service.focus(0, ["a4a5"]);
+    expect(service.status.deepening).toBe(false);
+  });
+});

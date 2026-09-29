@@ -64,7 +64,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       try { send("stop"); } catch (error) { void fail(error); }
     }
   }
-  const stopDeepening = () => { if (active?.deepen) stop(); };
+  const stopDeepening = () => { if (active?.deepen) { stop(); publish(); } };
   const deepenTarget = () => {
     const entry = deepenPly === null ? entries.at(-1) : entries.find((e) => e.ply === deepenPly);
     // 최강 차례는 깊게 보지 않는다(그 탐색이 곧 엔진의 수다). 1차 분석이 끝난 국면만.
@@ -157,6 +157,13 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       [kind]: score[kind] * sign || 0, win: sign === 1 ? primary.win : 100 - primary.win,
       depth: primary.depth, candidates, best, nnue: status.nnue, movetime: job.movetime, mode: job.mode, threads };
   }
+  // 기보에 저장된 평가(known)가 더 깊으면 평가는 그대로 두고 후보 수·최선수만 새로 쓴다: 마지막 국면은 후보 때문에
+  // 항상 다시 탐색하는데, 새로고침·복기 전환 뒤의 0.8초 결과가 "계속"으로 깊게 읽어 둔 평가를 덮어쓰지 않게(리뷰 A F1).
+  function keepDeeper(known, result) {
+    if (!known || !(known.depth > result.depth)) return result;
+    const { cp, mate, ...rest } = result;
+    return { ...rest, ...(known.cp !== undefined ? { cp: known.cp } : { mate: known.mate }), win: known.win, depth: known.depth };
+  }
   // 순위별 마지막 줄을 모은다. 탐색이 반복 도중 멈추면 뒤 순위에 이전 깊이의 줄이 남아 같은 수가 두 번 들어갈 수 있다
   // → 앞 순위(최신) 것만 남긴다.
   const candidatesOf = (lines) => [...lines].sort(([a], [b]) => a - b).map(([, v]) => v.candidate).filter(Boolean)
@@ -199,7 +206,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
         } else if (!primary) {
           void fail(new Error("엔진이 평가 점수를 보내지 않았어요.")); return;
         } else {
-          entry.result = resultOf(job, primary, candidates, best);
+          entry.result = keepDeeper(entry.known, resultOf(job, primary, candidates, best));
           onResult(entry.result);
           settle(entry, best);
         }
@@ -248,7 +255,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       if (changed) { cancelFocus(); stopDeepening(); } // 새 수가 붙어도 깊게 보기는 멈추고 새 국면부터 본다
       if (common < entries.length || id !== gameId) stop();
       for (const entry of entries.slice(common)) settle(entry, null);
-      // Preserve completed/in-flight max work when that ply becomes history.
+      // 최강 수를 둔 뒤 max 가 풀린 국면은 새 항목이 되지만, 앱은 그 탐색을 저장한 평가(known)를 넘기므로 다시 탐색하지 않는다
+      // (실측 2026-09-29: 최강 국면은 3000ms 한 번만).
       // 기보에 저장된 평가(known, 초 기준)가 있는 지난 국면은 다시 탐색하지 않는다. 현재 국면은 후보 수·최강 수가 필요해서 항상 탐색한다.
       const last = positions.length - 1;
       const cached = (p) => p.known && p.ply !== last && !p.max
@@ -286,7 +294,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     // 복기에서 보고 있는 국면을 깊게 본다. null 이면 마지막 국면(대국).
     deepen(ply) {
       deepenPly = ply ?? null;
-      if (active?.deepen && active.entry !== deepenTarget()) stop();
+      if (active?.entry !== deepenTarget()) stopDeepening();
       pump();
     },
     setNetwork(bytes, name = networkName) {
@@ -296,7 +304,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       networkChange?.resolve();
       networkChange = deferred();
       const promise = networkChange.promise;
-      for (const entry of entries) { entry.result = null; entry.error = null; entry.capped = false; }
+      // 다른 신경망으로 만든 저장 평가는 새 평가를 붙잡지 않는다.
+      for (const entry of entries) { entry.result = null; entry.error = null; entry.capped = false; entry.known = null; }
       onReset();
       stop(); publish(); pump();
       return promise;
