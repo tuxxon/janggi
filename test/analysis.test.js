@@ -417,6 +417,20 @@ describe("candidates from the engine's last batch (found while checking Korean n
     expect(results[0]).toMatchObject({ depth: 12, cp: 15 });
     expect(results[0].candidates).toEqual([{ move: "b1c3", cp: 15, win: results[0].win }]);
   });
+  it("an upperbound first rank (the only kind in 366 real searches) is not the evaluation (review round 2, fast2 #19)", async () => {
+    const { service, engine, results } = setup();
+    service.sync("g", [position(0)]); await service.ready;
+    for (const l of [
+      "info depth 11 multipv 1 score cp 76 nodes 291646 pv b1c3 b8e8", "info depth 11 multipv 2 score cp 72 nodes 291646 pv a4b4 h8c8",
+      "info depth 11 multipv 3 score cp 53 nodes 291646 pv h1f4 a7b7", "info depth 11 multipv 4 score cp 50 nodes 291646 pv g1f3 a7b7",
+      "info depth 11 multipv 5 score cp 45 nodes 291646 pv i4h4 a7b7",
+      "info depth 12 multipv 1 score cp 60 upperbound nodes 356857 pv b1c3 a7b7",
+      "info depth 11 multipv 2 score cp 72 nodes 356857 pv a4b4 h8c8", "info depth 11 multipv 3 score cp 53 nodes 356857 pv h1f4 a7b7",
+      "info depth 11 multipv 4 score cp 50 nodes 356857 pv g1f3 a7b7", "info depth 11 multipv 5 score cp 45 nodes 356857 pv i4h4 a7b7"]) engine.emit(l);
+    engine.emit("bestmove b1c3 ponder a7b7"); await tick();
+    expect(results[0]).toMatchObject({ depth: 11, cp: 76 });
+    expect(results[0].candidates.map((c) => [c.move, c.cp])).toEqual([["b1c3", 76], ["a4b4", 72], ["h1f4", 53], ["g1f3", 50], ["i4h4", 45]]);
+  });
   it("a focus search keeps every destination (real lines, 0.5 s MultiPV 3)", async () => {
     const { service, engine } = setup();
     service.sync("g", [position(0)]); await service.ready;
