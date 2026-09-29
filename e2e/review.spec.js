@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openIsolated } from "./helpers.js";
+import { openIsolated, clickBoard } from "./helpers.js";
 import { readFileSync, readdirSync } from "node:fs";
 
 const OLD = "2026-09-27T10-00-00-000", LIVE = "2026-09-28T10-00-00-000";
@@ -135,12 +135,7 @@ test("GPL 표기의 라이선스 원문과 엔진 파일이 배포본에 들어 
   expect(files).toContain("fsf/stockfish.wasm");
 });
 
-async function clickSq(page, r, c) {
-  await page.locator("svg[data-fen]").evaluate((el) => el.scrollIntoView({ block: "center" }));
-  const box = await page.locator("svg[data-fen]").boundingBox();
-  const k = box.width / 560;
-  await page.mouse.click(box.x + (40 + c * 60) * k, box.y + (40 + r * 60) * k);
-}
+const clickSq = (page, r, c) => clickBoard(page, r, c);
 const failWritesFor = (page, id) => page.evaluate((key) => {
   const original = Storage.prototype.setItem;
   Storage.prototype.setItem = function (k, v) { if (k === key) throw new Error("quota"); return original.call(this, k, v); };

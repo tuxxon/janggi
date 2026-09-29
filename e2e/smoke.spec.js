@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openIsolated } from "./helpers.js";
+import { openIsolated, clickBoard } from "./helpers.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { NNUE } from "../src/analysis/fsf.js";
@@ -10,13 +10,7 @@ const LOCAL_NNUE = `${homedir()}/.janggi/${NNUE.name}`;
 const START_FEN = "rnba1abnr/4k4/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/4K4/RNBA1ABNR w - - 0 1";
 
 // 보드 SVG viewBox(560x620) 좌표 → 화면 좌표. MG=40, S=60, 초가 아래(뒤집지 않음).
-async function clickSq(page, r, c) {
-  // selectOption 등이 페이지를 스크롤하면 판 윗줄이 화면 밖으로 나가 클릭이 허공에 떨어진다 → 판을 가운데로.
-  await page.locator("svg").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
-  const box = await page.locator("svg").first().boundingBox();
-  const k = box.width / 560;
-  await page.mouse.click(box.x + (40 + c * 60) * k, box.y + (40 + r * 60) * k);
-}
+const clickSq = (page, r, c) => clickBoard(page, r, c);
 
 test("앱이 뜨고, 격리가 켜지고, 기본 평가 승률이 나오고, 모든 수를 분석한다", async ({ page }) => {
   const externalRequests = [];

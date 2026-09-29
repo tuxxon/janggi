@@ -17,12 +17,14 @@ import { HintLabels } from "./analysis/HintLabels.jsx";
 // ===== React 화면 =====
 
 const S = 60, MG = 40, W = MG * 2 + S * 8, H = MG * 2 + S * 9;
+const GUT = 24; // 판 왼쪽·아래에 덧붙인 좌표 테두리(판 좌표계 0..W, 0..H 는 그대로 둔다)
 const RAD = { K: 27, R: 23, C: 23, H: 23, E: 23, A: 18, P: 18 };
 const GL = { K: { c: "楚", h: "漢" }, R: "車", C: "包", H: "馬", E: "象", A: "士", P: { c: "卒", h: "兵" } };
 const glyph = (p) => (typeof GL[p[1]] === "string" ? GL[p[1]] : GL[p[1]][p[0]]);
 const NAME = { c: "초(파랑)", h: "한(빨강)" };
 const COL = { c: "#1b4a8c", h: "#ae2219" };
 const MARK = "#e3a21a";
+const FILES = "abcdefghi";
 const REPETITION_NOTICE = "반복수: 한 기물로 두 칸을 계속 오갈 수 없어요.";
 const oct = (x, y, r) =>
   Array.from({ length: 8 }, (_, k) => {
@@ -356,14 +358,14 @@ export default function Janggi() {
         </div>}
         <Tray side={flip ? "c" : "h"} />
         <div style={{ borderRadius: 10, overflow: "hidden", boxShadow: "0 10px 30px rgba(40,20,5,.35)" }}>
-          <svg ref={svgRef} data-fen={toFen(view.b, view.turn)} viewBox={`0 0 ${W} ${H}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)} style={{ display: "block", width: "100%", height: "auto", userSelect: "none", touchAction: "none", cursor: canSelect ? "pointer" : "default" }}>
+          <svg ref={svgRef} data-fen={toFen(view.b, view.turn)} viewBox={`${-GUT} 0 ${W + GUT} ${H + GUT}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)} style={{ display: "block", width: "100%", height: "auto", userSelect: "none", touchAction: "none", cursor: canSelect ? "pointer" : "default" }}>
             <defs>
               <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
                 <stop offset="0" stopColor="#d6ab66" />
                 <stop offset="1" stopColor="#c19050" />
               </linearGradient>
             </defs>
-            <rect width={W} height={H} fill="url(#wood)" />
+            <rect x={-GUT} width={W + GUT} height={H + GUT} fill="url(#wood)" />
             {Array.from({ length: 10 }, (_, r) => (
               <line key={"r" + r} x1={MG} y1={MG + r * S} x2={MG + 8 * S} y2={MG + r * S} stroke="#4e3118" strokeWidth="1.6" />
             ))}
@@ -376,6 +378,16 @@ export default function Janggi() {
                 <line x1={MG + 5 * S} y1={MG + t * S} x2={MG + 3 * S} y2={MG + (t + 2) * S} />
               </g>
             ))}
+            {/* 좌표: 아래 a–i, 왼쪽 1–10(초 궁 줄이 1) — 후보 수 표기(g1→f3)와 같다. 판을 뒤집으면 같이 뒤집힌다.
+                가장자리 기물과 겹치지 않게 판 바깥 테두리(GUT)에 둔다(폰에서도 읽히는 크기). */}
+            <g style={{ pointerEvents: "none" }} fill="#3a2410" fontSize="19" fontWeight="700" fontFamily="serif">
+              {Array.from({ length: 9 }, (_, c) => (
+                <text key={"f" + c} data-coord="file" x={MG + c * S} y={H + GUT / 2 - 2} textAnchor="middle" dominantBaseline="middle">{FILES[flip ? 8 - c : c]}</text>
+              ))}
+              {Array.from({ length: 10 }, (_, r) => (
+                <text key={"k" + r} data-coord="rank" x={-GUT / 2 + 2} y={MG + r * S} textAnchor="middle" dominantBaseline="middle">{flip ? r + 1 : 10 - r}</text>
+              ))}
+            </g>
             {view.last && view.last.map((i, k) => {
               const [x, y] = xy(i);
               return <circle key={"l" + k} cx={x} cy={y} r="29" fill="none" stroke={MARK} strokeWidth="3.5" strokeDasharray={k === 0 ? "5 5" : undefined} />;

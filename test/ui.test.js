@@ -83,3 +83,20 @@ describe("M2 UI rendering", () => {
     expect(render()).toContain("초 a4a5 −30%p 대실수 ??");
   });
 });
+
+describe("board coordinates (user request 2026-09-29)", () => {
+  const labels = (html, kind) => [...html.matchAll(new RegExp(`data-coord="${kind}"[^>]*>([^<]+)<`, "g"))].map((m) => m[1]);
+  it("labels files a–i along the bottom and ranks 10→1 down the left side (초 궁 줄이 1)", () => {
+    vi.stubGlobal("localStorage", fake());
+    const html = render();
+    expect(labels(html, "file").join("")).toBe("abcdefghi");
+    expect(labels(html, "rank")).toEqual(["10", "9", "8", "7", "6", "5", "4", "3", "2", "1"]);
+  });
+  it("flips the labels with the board when 한 is at the bottom", () => {
+    const flipped = { ...record, bottom: "h" };
+    vi.stubGlobal("localStorage", fake({ "janggi.index": JSON.stringify([{ id }]), [`janggi.game.${id}`]: JSON.stringify(flipped) }));
+    const html = render();
+    expect(labels(html, "file").join("")).toBe("ihgfedcba");
+    expect(labels(html, "rank")).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+  });
+});

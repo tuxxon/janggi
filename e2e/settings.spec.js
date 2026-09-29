@@ -20,6 +20,11 @@ test("아래가 한이면 사람끼리여도 판이 뒤집히고, 새로고침�
   await page.getByRole("button", { name: "새 게임" }).click();
   expect(await latestRecord(page)).toMatchObject({ bottom: "h", controllers: { c: "human", h: "human" } });
   expect(await topLeftColor(page)).toBe(BLUE);
+  // 좌표도 같이 뒤집힌다: 화면 왼쪽부터 i→a, 위부터 1→10 (사용자 요청 2026-09-29)
+  // SVG <text> 에는 innerText 가 없다 → textContent 로 읽는다.
+  const labels = (kind) => page.locator(`[data-coord="${kind}"]`).evaluateAll((els) => els.map((e) => e.textContent));
+  expect((await labels("file")).join("")).toBe("ihgfedcba");
+  expect(await labels("rank")).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
   await page.reload();
   await expect(select(page, "아래 나라")).toHaveValue("h");
   expect(await topLeftColor(page)).toBe(BLUE);
