@@ -1,11 +1,11 @@
 # 장기(janggi) 핸드북
 
 다음 세션이 이 문서 하나로 이어서 일할 수 있게 쓴 안내서다. 결정의 근거와 세부 규칙의 정본은 설계 문서다:
-[`docs/superpowers/specs/2026-09-28-janggi-mcp-design.md`](superpowers/specs/2026-09-28-janggi-mcp-design.md) (개정 2.8).
+[`docs/superpowers/specs/2026-09-28-janggi-mcp-design.md`](superpowers/specs/2026-09-28-janggi-mcp-design.md) (개정 2.9).
 
 - 저장소: `~/workspace/janggi` · GitHub [tuxxon/janggi](https://github.com/tuxxon/janggi) (public)
-- 기준: 2026-09-29, main `b50eea8`
-- 진행 중 브랜치: `wip/deeper-analysis` (`460d55c`, 테스트만 있고 빨간불)
+- 기준: 2026-09-29, main (이 문서를 고친 커밋)
+- 진행 중 브랜치: 없음. "더 깊이 보기"와 "한글 기물 이름(수순·직전 수)"은 main 에 들어갔다.
 
 ---
 
@@ -20,10 +20,9 @@
 | 승률 | 대국 중 막대, 직전 수 변화와 실수 등급(?! ? ??), 훈수 모드(상위 5수 + 집은 기물의 수마다 승률) |
 | 기보 | 수마다 localStorage에 저장. 새로고침해도 이어진다. 복기(버튼·←→·수순·그래프, 빈 평가 자동 분석), JSON 내보내기·가져오기 |
 | 반복수 | 카카오식: 궁·사가 아닌 기물로 두 칸을 계속 오갈 수 없다(같은 수 세 번째 금지). 쉬기·잡기·장군이 끼면 다시 센다 |
-| 표시 | 판에 좌표(아래 a–i, 왼쪽 1–10). 후보 수에 한글 기물 이름("마 g1→f3") |
-| 테스트 | 단위 155개 · Playwright 35개(Chromium + WebKit 스모크) — main 에서 전부 초록 |
-
-**진행 중: "수를 더 깊이 보기"** (사용자가 네 가지를 다 골랐다. 5절 참고)
+| 표시 | 판에 좌표(아래 a–i, 왼쪽 1–10). 후보 수·복기 수순·직전 수 줄에 한글 기물 이름("마 g1→f3") |
+| 분석 모드 | 설정의 "분석": 빠르게 0.8초 / 깊게 3초 / **계속**(기본, 보고 있는 국면을 최대 20초 계속 깊게). 즉시 적용, `janggi.prefs`에 기억. 엔진 스레드 = 코어의 절반(1~8), Hash 64MB, 최강 3초 |
+| 테스트 | 단위 199개 · Playwright 40개(Chromium + WebKit 스모크) — main 에서 전부 초록 |
 
 ## 2. 실행과 테스트
 
@@ -54,16 +53,18 @@ src/seats.js           자리 설정: seatsOf/chooseNation(연동)/nextGame/pend
 src/winrate.js         cp→승률(lichess 체스 곡선, 추정치), moveDelta, grade, moverWin
 src/review.js          복기 순수 계산(reviewRows, chartPoints, resultText)
 src/Janggi.jsx         화면(판 SVG·드래그·애니메이션은 원본). 왼쪽 판 열 + 오른쪽 패널(설정 또는 복기)
-src/Settings.jsx       설정 패널(자리별 나라·두는 이·상차림, 난이도, "새 게임부터 적용" 알림)
+src/Settings.jsx       설정 패널(자리별 나라·두는 이·상차림, 난이도, 분석 모드, "새 게임부터 적용" 알림)
+src/prefs.js           보기 설정 localStorage["janggi.prefs"] = { analysis: "fast"|"deep"|"continuous" } (기본 continuous)
 src/Review.jsx         기보 목록, 복기 패널, 승률 그래프
 src/engineMove.js      원본 bestMove 루트 루프에서 막힌 수 하나를 뺀 버전
-src/analysis/service.js      UCI 서비스(주입된 엔진): 국면 대기열(빠짐없이 순서대로), 최강 우선, 초점 분석, 신경망 교체, 재시작 1회
+src/analysis/service.js      UCI 서비스(주입된 엔진): 국면 대기열(빠짐없이 순서대로), 최강 우선, 초점 분석, 신경망 교체, 재시작 1회,
+                             분석 모드(setMode)와 깊게 보기(deepen, 선점·점진 결과·20초 상한)
 src/analysis/gameAnalysis.js 판 ↔ 서비스 연결(analysisPositions{restrictions}, cacheEvaluation 병합, engineTurn)
-src/analysis/useAnalysis.js  React 훅(판별 캐시, known 평가 전달)
-src/analysis/fsf.js / nnue.js  WASM 로더, 사용자 신경망(크기+SHA-256 전체)
+src/analysis/useAnalysis.js  React 훅(판별 캐시, known 평가 전달, setMode·deepen 효과)
+src/analysis/fsf.js / nnue.js  WASM 로더(threadsFor, Hash 64), 사용자 신경망(크기+SHA-256 전체)
 vendor/coi-serviceworker.js  격리 서비스워커 수정본(MIT) — WebKit 304 처리
 scripts/vendor.mjs     public/ 으로 엔진 파일·SW·라이선스 고지 복사(dev/build 전에 자동)
-e2e/                   smoke / review / settings .spec.js + helpers.js(openIsolated, clickBoard)
+e2e/                   smoke / review / settings / analysis .spec.js + helpers.js(openIsolated{analysis, cores}, clickBoard)
 ```
 
 ## 4. 사용자가 정한 것 (다시 묻지 말 것)
@@ -78,53 +79,23 @@ e2e/                   smoke / review / settings .spec.js + helpers.js(openIsola
   - 카카오 공식 문서는 못 찾았다. 그래서 FSF `janggimodern`(카카오 호환)을 줄 단위로 따라갔고, 리뷰어가 6,400국면을 대조해서 차이 0을 확인했다.
   - 사용자 규칙으로 쉬기(내 쉬기·상대 쉬기·자동 쉬기)가 끼면 셈이 끊긴다. 이 부분은 FSF와 다르다.
   - 새 판부터 적용한다(`repetition: true`). 옛 기보는 규칙 없이 재생한다.
-- **분석 깊이**(진행 중): 계속 깊게 보기 + 코어 여러 개 + 최강 더 깊게 + 설정에서 고르기 — **네 가지 전부**.
+- **분석 깊이**: 계속 깊게 보기 + 코어 여러 개 + 최강 더 깊게 + 설정에서 고르기 — **네 가지 전부**(구현 끝, spec 2.9).
+- **난이도는 새 게임부터**(2026-09-29 답): 대국 중 즉시 바꾸지 않는다. 두는 이와 분석 모드만 즉시.
+- **한글 기물 이름**(2026-09-29 답): 후보 수, 복기 수순, 직전 수 평가 줄 모두.
 
-## 5. 다음 할 일 — "더 깊이 보기" (진행 중)
+## 5. 끝난 일 — "더 깊이 보기" (2026-09-29, spec 2.9)
 
-### 5.1 정한 동작
-- **설정 패널에 "분석" 선택지**: 빠르게(0.8초) / 깊게(3초) / **계속**(기본).
-  - 계속: 0.8초 결과를 먼저 보여주고, 다음 수를 둘 때까지 그 국면을 최대 20초 동안 계속 깊게 읽는다.
-  - 보기 설정이라 즉시 적용하고, localStorage(예: `janggi.prefs`)에 기억한다.
-- **코어**: `Threads = clamp(floor(navigator.hardwareConcurrency / 2), 1, 8)`. 이 맥(14코어)이면 7. Hash 는 64MB.
-- **최강**: 3000ms(원래 1000), MultiPV 1, 위 스레드 수.
-- **복기**: 보고 있는 k수째 국면을 계속 깊게 읽는다(`service.deepen(k)`).
+동작의 정본은 spec 7절 "분석 모드 — 더 깊이 보기"다. 여기는 요약과 리뷰 결과만 둔다.
 
-### 5.2 실측 근거 (M3 Max, Chromium WASM, NNUE)
-
-| 설정 | 초반 | 중반 |
-|---|---|---|
-| 지금: MultiPV 5 · 1스레드 · 0.8초 | depth 11 | depth 13 |
-| 4스레드 · 0.8초 | 12 | 15 |
-| 1스레드 · 3초 | 14 | 18 |
-| 8스레드 · 3초 | 17 | 20 |
-| MultiPV 1 · 4스레드 · 3초 | 16 | 28 |
-
-### 5.3 구현 순서 (TDD — 빨간 테스트는 이미 있다)
-1. `git checkout wip/deeper-analysis`로 가서 `npx vitest run test/analysis.test.js`를 돌린다. `describe("deeper analysis …")`의 11개가 빨간 게 정상이다.
-2. **`src/analysis/service.js`**
-   - 옵션을 받는다: `threads`(기본 1), `hash`(기본 32), `mode`(`"fast"|"deep"|"continuous"`, 기본 `"fast"`). `setMode(m)`, `deepen(ply|null)`를 추가한다.
-   - movetime: fast 800 / deep 3000 / continuous 1차 800 → 깊게 보기는 `go movetime 20000`. 최강 3000, 초점 500.
-   - 우선순위: 최강 > 밀린 국면(순서대로) > 초점 > 깊게 보기(대기 중인 일이 없을 때만). **최강 차례 국면은 깊게 보지 않는다.**
-   - 선점: `sync`로 판이 바뀌거나(새 수가 붙는 경우 포함), `focus`, `setMode`(continuous가 아닌 쪽으로), `deepen`(다른 ply로), `setNetwork`, `dispose`가 오면 깊게 보던 탐색을 `stop`한다.
-   - **점진 결과**: `multipv 1` 줄이 **지금 보여준 결과보다 깊을 때만** `onResult`로 보낸다. 선점 뒤 다시 시작한 얕은 탐색이 표시를 뒤로 돌리지 않게 하려는 것이다.
-   - 20초 상한을 다 채운 ply는 다시 깊게 보지 않는다. `setMode`나 `setNetwork`가 오면 다시 허용한다.
-   - 🔴 **감시 타이머(RESPONSE_TIMEOUT 15초)를 `movetime + 15초`로 바꿔야 한다.** 그대로면 20초 탐색이 매번 "엔진 실패"로 끝난다.
-   - `status.deepening`을 publish 한다.
-3. **`src/analysis/fsf.js` / `useAnalysis.js`**: 스레드 수를 계산해서 넘기고, mode를 넘기고(prefs), 복기면 `deepen(k)`를 부르고, 대국으로 돌아오면 `deepen(null)`을 부른다.
-4. **`Settings.jsx`**: "분석" 선택지(빠르게/깊게/계속)를 넣는다. **`Janggi.jsx`** 승률 막대 설명에는 "깊이 N · 계속 분석 중"을 표시한다.
-5. `gameAnalysis.cacheEvaluation`의 engine 문자열에 모드와 최강 시간을 반영한다(평가 병합 로직은 그대로).
-6. **e2e**
-   - 모드 선택지가 있고 새로고침 뒤에도 기억되는지
-   - "계속"에서 깊이가 시간이 지나며 커지는지
-   - 기존 e2e는 CPU 부하로 흔들릴 수 있다 → `openIsolated`에서 prefs를 "빠르게"로 심는 걸 고려한다. 모드 테스트만 따로 계속 모드로 돌린다.
-7. Opus×2 적대적 리뷰(worktree, 서로 다른 `E2E_PORT`) → HIGH/MED 고침 → main에 병합하고 푸시한다.
+- **분석 모드**: 빠르게 0.8초 / 깊게 3초 / **계속**(기본). 계속은 0.8초 결과 뒤 할 일이 없으면 보고 있는 국면(대국 = 마지막, 복기 = k수째)을 `go movetime 20000`으로 읽는다. 우선순위 최강 > 밀린 국면 > 초점 > 깊게 보기, 최강 차례는 깊게 보지 않는다.
+- **점진 결과**: MultiPV 묶음의 마지막 순위 줄이 왔을 때, 1순위가 보여준 결과보다 깊을 때만.
+- **저장 평가 보존**: 마지막 국면은 후보 때문에 항상 다시 읽지만, 기보에 더 깊은 평가(known)가 있으면 평가는 그대로 두고 후보·최선수만 바꾼다. 신경망을 바꾸면 known 을 버린다.
+- **스레드**: 코어의 절반(1~8). `navigator.deviceMemory`가 8GB 미만이면 `max(1, floor(GB/2))`. Hash 64MB. 최강 3000ms·MultiPV 1.
+- **실측**(M3 Max, Chromium WASM, NNUE, 초반/중반 depth): MultiPV 5·1스레드·0.8초 11/13 → 4스레드·0.8초 12/15 → 8스레드·3초 17/20 → MultiPV 1·4스레드·3초 16/28. 기본 평가·7스레드 "계속"은 초기 국면 20초 동안 깊이 11 → 18.
+- **메모리**(리뷰어 실측, WASM 공유 힙): 1스레드 184MB · 2스레드 204 · 4스레드 382(코어 8) · 7스레드 551 · 8스레드 661. 한 번 늘면 줄지 않는다.
+- **리뷰**(Opus×2, worktree): HIGH 없음. MED 는 모두 고쳤다 — 깊게 읽은 평가가 새로고침 뒤 얕아짐, 테스트 빈틈 4개(MultiPV 5·searchmoves·쉬는 엔진에서 deepen·한 차례 부호), 저메모리 기기 스레드(사용자 결정). "최강 국면을 다시 탐색한다"는 서비스 단독 재현이었고, 앱에서는 UCI 로그로 한 번만 탐색하는 걸 확인해서 고치지 않았다.
 
 ## 6. 그 뒤에 남은 것
-
-**사용자에게 물어두고 답을 못 받은 것**
-- 난이도도 대국 중에 즉시 바꿀까? (지금은 새 게임부터)
-- 직전 수 평가 줄과 복기 수순에도 한글 기물 이름을 넣을까? (지금은 후보 수에만)
 
 **배포 (사용자 동의가 필요한 바깥 작업)**
 1. `gh api repos/tuxxon/janggi/transfer -f new_owner=touchizen`으로 이전을 요청한다. 사용자가 touchizen 계정으로 수락해야 한다.
@@ -144,6 +115,10 @@ e2e/                   smoke / review / settings .spec.js + helpers.js(openIsola
 - 바꿔 둔 나라·상차림·난이도는 새로고침하면 사라진다.
 - 동형반복(서로 다른 기물로 같은 국면 반복)과 만년장 전체 규칙은 범위 밖이다.
 - 쉬기 처리는 FSF와 다르다(의도한 것).
+- "깊게"로 바꿔도 지금 보이는 국면은 다시 읽지 않는다(다음 국면부터 3초). 계속으로 바꾸면 바로 깊게 읽는다.
+- 깊게 모드에서 사람이 3초 안에 두면, 최강 차례가 진행 중인 3초 탐색 뒤에서 기다린다(원래는 0.8초). 달리는 일반 탐색은 선점하지 않는다.
+- 감시 타이머는 `stop`을 보낼 때 다시 맞추지 않는다. 깊게 보기를 멈춘 뒤 엔진이 응답하지 않으면 최강 차례가 15초가 아니라 최대 35초 뒤에 실패로 잡힌다(추정, 재현 안 함).
+- "계속"은 새로고침하면 상한 기록(capped)이 메모리에만 있어서 같은 국면을 다시 20초 읽는다(보여준 깊이보다 깊을 때만 표시).
 
 ## 7. 일하는 방식 (이 프로젝트에서 합의·확인된 것)
 
@@ -176,3 +151,9 @@ e2e/                   smoke / review / settings .spec.js + helpers.js(openIsola
 | python `open(p,'w').write(open(p).read())`가 파일을 먼저 비운다(`Janggi.jsx`가 0바이트가 됐다) | 읽고 나서 `with open(p,'w')`로 쓴다 |
 | zsh 에서 `echo ====`가 `=` 확장 에러를 낸다 | 구분선은 따옴표로 감싼다 |
 | 세션의 `grep`은 셸 함수라 큰 파이프에서 아무것도 안 찍는다 | `/usr/bin/grep` |
+| e2e 뮤테이션 스크립트가 소스는 되돌려도 `dist/`는 **마지막 뮤턴트로 빌드된 채** 남는다. `npx playwright test`는 빌드하지 않아서 그 뒤 스트레스·진단이 전부 망가진 빌드를 테스트했다(가짜 "버그"를 한참 쫓음) | e2e 는 항상 `npm run test:e2e`(빌드 포함). 뮤테이션을 돌린 뒤엔 다시 빌드 |
+| `git add -A`가 리뷰어 worktree(`.claude/worktrees/agent-*`)를 임베디드 저장소로 커밋에 넣었다 | `.git/info/exclude`에 `.claude/worktrees/`(로컬 설정, 새 클론이면 다시) |
+| 복기 e2e 의 진행 중인 판이 엔진 차례면, 열자마자·복기에서 돌아오자마자 420ms 뒤 엔진이 둬서 FEN 비교가 경합한다(main 에서도 12번 중 2번) | 진행 중인 판은 사람끼리로 심는다 |
+| 복기에서도 **마지막 국면은 항상 다시 탐색**하고, 여러 스레드 탐색은 매번 값이 조금 다르다. 1스레드일 땐 심은 평가와 우연히 같아서 정확한 %p 단언이 통과했다 | 정확한 값 단언은 캐시된(지난) 국면에만 |
+| MultiPV 점진 결과를 1순위 줄에서 보내면 이전 반복의 아래 순위와 섞여 후보가 하나 빠진다(실측 표본 180개 중 73개가 4개) | 엔진이 찍는 1~N순위 묶음의 마지막 줄에서 보낸다 |
+| 스레드가 코어의 절반(이 맥 7)이라 병렬 e2e 워커끼리 CPU를 다퉈 서비스워커 첫 방문 격리가 20초를 넘겼다(평소 실행 4번 중 1번, main 은 0번) | `openIsolated`가 기본으로 코어 2개(엔진 1스레드)로 보이게 하고, 저장된 값이 없으면 "빠르게"를 심는다. 실제 스레드·계속 모드는 `analysis.spec.js`와 WebKit 스모크가 `cores: null`로 본다 |
