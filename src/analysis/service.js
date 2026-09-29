@@ -262,10 +262,16 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     }
     // 깊게 보기는 점진 결과: 묶음의 마지막 순위가 왔을 때, 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
     // (선점 뒤 다시 시작한 얕은 탐색이 표시를 되돌리지 않게). 2단계(MultiPV 1)는 묶음이 1순위 한 줄이라 정확한 1순위 줄마다다.
-    const primary = active.primary;
-    if (parsed && parsed.rank === active.ranks && active.deepen && !active.cancelled && primary?.depth > active.entry.result.depth) {
-      const candidates = active.cap !== undefined ? mergedCandidates(active.entry.first, primary) : candidatesOf(active.lines, primary);
-      active.entry.result = resultOf(active, primary, candidates, primary.candidate ? uciToMove(primary.candidate.move) : null);
+    // 2단계의 문턱은 이 국면에서 목록이 보여준 깊이(listDepth: 후보 1단계 줄, 그 뒤 2단계 줄)다 — 전에 깊게 읽어 저장된 국면도
+    // 1순위·"같은 수"를 보여주게(최종 리뷰 A I2). 평가(점수·승률·깊이)는 저장된 평가가 더 깊으면 그것을 둔다(keepDeeper).
+    // 진행 중인 판의 깊게 보기(cap 없음)는 문턱이 결과의 깊이 그대로다(그 결과가 이미 저장된 깊이 이상이라 keepDeeper 는 그대로 둔다).
+    const primary = active.primary, stage2 = active.cap !== undefined;
+    if (parsed && parsed.rank === active.ranks && active.deepen && !active.cancelled &&
+      primary?.depth > (stage2 ? active.entry.listDepth : active.entry.result.depth)) {
+      const candidates = stage2 ? mergedCandidates(active.entry.first, primary) : candidatesOf(active.lines, primary);
+      if (stage2) active.entry.listDepth = primary.depth;
+      active.entry.result = keepDeeper(active.entry.known,
+        resultOf(active, primary, candidates, primary.candidate ? uciToMove(primary.candidate.move) : null));
       onResult(active.entry.result);
     }
     // 무제한이 엔진의 마지막 깊이를 끝냈으면 더 읽을 것이 없다: 엔진은 stop 까지 코어를 돌리며 기다리므로 다 읽은 것으로 멈춘다.
@@ -293,6 +299,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
         } else {
           entry.result = keepDeeper(entry.known, resultOf(job, primary, candidates, best));
           entry.first = candidates; // 1단계 후보: 2단계 결과가 entry.result 를 덮어도 목록의 2~5순위로 쓴다
+          entry.listDepth = primary.depth; // 목록 1순위의 깊이(저장된 평가가 더 깊어도 이 탐색의 줄): 2단계는 이보다 깊을 때 보낸다
           onResult(entry.result);
           settle(entry, best);
         }

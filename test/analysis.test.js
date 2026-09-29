@@ -893,9 +893,9 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     expect(rows(results.at(-1).candidates)).toEqual([["a4a5", 30, 13], ["b1c3", 20, 13], ["g1f3", 10, 13], ["c4c5", 5, 12], ["i4h4", 0, 12]]);
     expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 1", "position fen fen-0",
       `go movetime 20000 searchmoves ${roots.join(" ")}`]);
-    const before = results.length;
-    engine.emit(line(17, 20, "b1c3"));
-    expect(results.length).toBe(before);                                  // 저장된 깊이보다 깊어야 보낸다
+    engine.emit(line(15, 20, "b1c3"));                                    // 목록이 보여준 13보다 깊다: 저장된 17 보다 얕아도 보낸다
+    expect(results.at(-1)).toMatchObject({ ply: 0, cp: 12, win: 51.1, depth: 17, deepCap: 20000, stable: 1 }); // 막대는 저장된 17수 평가
+    expect(rows(results.at(-1).candidates)).toEqual([["b1c3", 20, 15], ["a4a5", 30, 13], ["g1f3", 10, 13], ["c4c5", 5, 12], ["i4h4", 0, 12]]);
     engine.emit(line(18, 25, "b1c3"));
     expect(results.at(-1)).toMatchObject({ ply: 0, depth: 18, cp: 25, deepCap: 20000 });
     expect(rows(results.at(-1).candidates)).toEqual([["b1c3", 25, 18], ["a4a5", 30, 13], ["g1f3", 10, 13], ["c4c5", 5, 12], ["i4h4", 0, 12]]);
@@ -1228,6 +1228,29 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
   it("rejects a cap that is not 20000, 60000, 300000 or Infinity", () => {
     const { service } = setup({ mode: "continuous" });
     for (const cap of ["infinite", 30000, 0]) expect(() => service.deepen(0, cap)).toThrow("깊게 보기 상한");
+  });
+
+  // 최종 리뷰 A I2(개정 2.10 "다시 찾아간 국면"): 전에 깊게 읽어 저장된 국면도 2단계의 1순위·"같은 수"를 보여준다. 2단계 결과의
+  // 문턱은 이 국면에서 목록이 보여준 깊이(후보 1단계 줄, 그 뒤 2단계 줄)이지 저장된 깊이가 아니다. 평가는 저장된 것이 더 깊으면 그것.
+  it("a revisited ply (stored depth 22) lists the second stage's first rank and count past the candidate pass; the bar keeps the stored evaluation until stage 2 passes it", async () => {
+    const { service, engine, results } = setup({ mode: "continuous", hash: 64 });
+    service.sync("saved", [position(0, "c", { known: { cp: 25, win: 52.3, depth: 22 } }), position(1)]);
+    service.deepen(0, 20000); await service.ready;
+    firstPass(engine); await tick(); firstPass(engine); await tick();       // 1수째 · 0수째의 후보 1단계(저장된 22 가 남는다)
+    expect(results.at(-1)).toMatchObject({ ply: 0, cp: 25, win: 52.3, depth: 22, movetime: 800 });
+    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    const before = results.length;
+    for (let d = 10; d <= 13; d++) engine.emit(line(d, 40, "b1c3"));
+    expect(results.length).toBe(before);                                    // 목록이 보여준 1단계 깊이(13)까지는 보내지 않는다
+    for (let d = 14; d <= 23; d++) engine.emit(line(d, 40, "b1c3"));
+    expect(results.slice(before).map((r) => [r.candidates[0].depth, r.depth, r.cp, r.stable])).toEqual([
+      [14, 22, 25, 5], [15, 22, 25, 6], [16, 22, 25, 7], [17, 22, 25, 8], [18, 22, 25, 9], [19, 22, 25, 10], [20, 22, 25, 11],
+      [21, 22, 25, 12], [22, 22, 40, 13], [23, 23, 40, 14]]);
+    expect(results[before]).toMatchObject({ ply: 0, win: 52.3, deepCap: 20000, movetime: 20000, best: [82, 65] });
+    expect(rows(results[before].candidates)).toEqual([["b1c3", 40, 14], ["a4a5", 30, 13], ["g1f3", 10, 13], ["c4c5", 5, 12], ["i4h4", 0, 12]]);
+    expect(results.at(-1).win).toBe(results.at(-1).candidates[0].win);     // 저장된 깊이를 넘으면 막대도 2단계 줄
+    engine.emit("bestmove b1c3"); await tick();
+    expect(results.at(-1)).toMatchObject({ depth: 23, cp: 40, stable: 14 });
   });
 
   // 최종 리뷰 A·B I1: 저장된 판 복기를 떠나면 useAnalysis 는 한 커밋에서 sync(진행 중인 판) 다음에 deepen(null, null) 을 부른다.
