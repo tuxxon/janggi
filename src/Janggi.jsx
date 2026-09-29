@@ -313,7 +313,8 @@ export default function Janggi() {
   const ply = g.moves.length, previous = g.hist.at(-1), evals = analysis.cache?.evals;
   const delta = review ? rows[review.k - 1]?.delta ?? null
     : previous && evals?.[ply - 1] && evals?.[ply] ? moveDelta(evals[ply - 1].win, evals[ply].win, previous.turn) : null;
-  const lastSide = review ? rows[review.k - 1]?.side : previous?.turn, lastMove = review ? rows[review.k - 1]?.move : g.moves.at(-1);
+  const lastSide = review ? rows[review.k - 1]?.side : previous?.turn;
+  const lastMove = review ? rows[review.k - 1]?.label : previous && describeMove(previous.b, g.moves.at(-1)); // "졸 a4→a5"
   const lastEvaluation = delta === null ? null : `${lastSide === "c" ? "초" : "한"} ${lastMove} ${delta < 0 ? "−" : "+"}${Math.abs(delta).toFixed(0)}%p${grade(delta) ? " " + grade(delta) : ""}`;
   const viewEval = review ? analysis.evals?.[review.k] : analysis.evaluation;
   const candidates = hints ? (review ? analysis.results?.[review.k]?.candidates : analysis.current?.candidates) ?? [] : [];

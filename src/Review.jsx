@@ -86,7 +86,7 @@ export function ReviewPanel({ rows, k, n, setK, evals, onExit }) {
             style={{ display: "flex", gap: 8, padding: "5px 10px", cursor: "pointer", background: r.ply === k ? "#f3d99a" : undefined }}>
             <span style={{ width: 28, color: "#65584a" }}>{r.ply}.</span>
             <span style={{ color: COL[r.side], width: 18 }}>{r.side === "c" ? "초" : "한"}</span>
-            <span style={{ width: 56 }}>{r.move === "pass" ? "쉬기" : r.move}</span>
+            <span style={{ width: 84, whiteSpace: "nowrap" }}>{r.label}</span>
             <span>{r.delta === null ? "" : `${r.delta < 0 ? "−" : "+"}${Math.abs(r.delta).toFixed(0)}%p`}{r.grade ? ` ${r.grade}` : ""}</span>
             {r.autoPassAfter && <span style={{ color: "#65584a" }}>· 상대 둘 수 없어 쉼</span>}
           </li>

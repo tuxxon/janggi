@@ -80,7 +80,7 @@ describe("M2 UI rendering", () => {
       { ply: 0, cp: 190, win: 65, depth: 12 }, { ply: 1, cp: -190, win: 35, depth: 12 },
     ] } };
     vi.stubGlobal("localStorage", fake({ "janggi.index": JSON.stringify([{ id }]), [`janggi.game.${id}`]: JSON.stringify(saved) }));
-    expect(render()).toContain("초 a4a5 −30%p 대실수 ??");
+    expect(render()).toContain("초 졸 a4→a5 −30%p 대실수 ??"); // 한글 기물 이름(사용자 요청 2026-09-29)
   });
 });
 

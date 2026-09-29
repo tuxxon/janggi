@@ -12,10 +12,15 @@ describe("review rows", () => {
     // evals are Cho's win %: 50 → 52 (초 +2) → 80 (한 −28 실수) → 45 (초 −35 대실수)
     const evals = [{ win: 50 }, { win: 52 }, { win: 80 }, { win: 45 }];
     expect(reviewRows(record, positions, evals)).toEqual([
-      { ply: 1, side: "c", move: "a4a5", delta: 2, grade: null, autoPassAfter: false },
-      { ply: 2, side: "h", move: "a7a6", delta: -28, grade: "실수 ?", autoPassAfter: false },
-      { ply: 3, side: "c", move: "pass", delta: -35, grade: "대실수 ??", autoPassAfter: false },
+      { ply: 1, side: "c", move: "a4a5", label: "졸 a4→a5", delta: 2, grade: null, autoPassAfter: false },
+      { ply: 2, side: "h", move: "a7a6", label: "병 a7→a6", delta: -28, grade: "실수 ?", autoPassAfter: false },
+      { ply: 3, side: "c", move: "pass", label: "쉬기", delta: -35, grade: "대실수 ??", autoPassAfter: false },
     ]);
+  });
+  it("labels each move with the Korean name of the piece that moved (user request 2026-09-29)", () => {
+    const record = { ...base, moves: ["b1c3", "h10g8", "a1a2"] };
+    const { positions } = replay(record);
+    expect(reviewRows(record, positions, undefined).map((r) => r.label)).toEqual(["마 b1→c3", "마 h10→g8", "차 a1→a2"]);
   });
   it("leaves the change empty when either side's evaluation is missing", () => {
     const record = { ...base, moves: ["a4a5", "a7a6"] };
@@ -46,7 +51,7 @@ describe("result text", () => {
 describe("auto-pass marker (review gap)", () => {
   it("marks a move after which the same side is to move again", () => {
     const record = { moves: ["a1a2", "b1b2"] };
-    const positions = [{ turn: "c" }, { turn: "c" }, { turn: "h" }];
+    const positions = [{ turn: "c", b: [] }, { turn: "c", b: [] }, { turn: "h", b: [] }];
     expect(reviewRows(record, positions, undefined).map((r) => r.autoPassAfter)).toEqual([true, false]);
   });
 });

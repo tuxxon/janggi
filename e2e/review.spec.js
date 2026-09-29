@@ -51,6 +51,7 @@ test("지난 판을 열어 버튼·방향키·수순·그래프로 이동하고,
   const rows = page.getByTestId("review-row");
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(0)).toContainText("+2%p");
+  await expect(rows.nth(2)).toContainText("졸 c4→c5");        // 수순에도 한글 기물 이름(사용자 요청 2026-09-29)
   await expect(rows.nth(1)).toContainText("−28%p 실수 ?");
   // 마지막 국면은 복기에서도 항상 다시 탐색한다(후보 수용). 여러 스레드 탐색은 매번 값이 조금 달라서 심은 −35 가 흔들린다.
   await expect(rows.nth(2)).toContainText(/−3\d%p 대실수 \?\?/);
