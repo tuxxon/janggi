@@ -1,12 +1,12 @@
 # 장기(janggi) 핸드북
 
 다음 세션이 이 문서 하나로 이어서 일할 수 있게 쓴 안내서다. 결정의 근거와 세부 규칙의 정본은 설계 문서다:
-[`docs/superpowers/specs/2026-09-28-janggi-mcp-design.md`](superpowers/specs/2026-09-28-janggi-mcp-design.md) (개정 2.9).
+[`docs/superpowers/specs/2026-09-28-janggi-mcp-design.md`](superpowers/specs/2026-09-28-janggi-mcp-design.md) (개정 2.10).
 
 - 저장소: `~/workspace/janggi` · GitHub [tuxxon/janggi](https://github.com/tuxxon/janggi) (public)
-- 기준: 2026-09-29, main (이 문서를 고친 커밋)
-- 진행 중 브랜치: 없음. "더 깊이 보기", "한글 기물 이름", **반복수 수정**(`76e38ba`)이 main 에 들어갔다.
-- **Flutter 앱 "장기9단"**: `~/workspace/janggi-flutter`(비공개). 이어서 할 때는 그 저장소의 `docs/HANDOFF-2026-09-29.md` 부터.
+- 기준: 2026-09-30, 브랜치 `review-deep-look` (이 문서를 고친 커밋)
+- 진행 중 브랜치: `review-deep-look` — **복기 깊게 보기**(저장된 판 복기 전용, 개정 2.10). 리뷰 끝, main 병합은 사용자 확인 뒤. 그 전 것("더 깊이 보기", "한글 기물 이름", 반복수 수정 `76e38ba`)은 main 에 있다.
+- **Flutter 앱 "장기9단"**: `~/workspace/janggi-flutter`(비공개). 이어서 할 때는 그 저장소의 `docs/HANDOFF-2026-09-29-m0.md` 부터.
 
 ---
 
