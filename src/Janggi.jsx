@@ -6,6 +6,7 @@ import { replay, toRecord } from "./record.js";
 import { reviewRows } from "./review.js";
 import { GameList, ReviewPanel } from "./Review.jsx";
 import { SettingsPanel } from "./Settings.jsx";
+import { loadPrefs, savePrefs } from "./prefs.js";
 import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, withWho } from "./seats.js";
 import { forbiddenMove } from "./repetition.js";
 import { toFen, moveToUci, describeMove } from "./notation.js";
@@ -48,10 +49,10 @@ function Piece({ p, x, y, selected, lifted }) {
 }
 
 // ---- 승률 분석 (Fairy-Stockfish WASM) ----
-function WinBar({ a, status, fen }) {
+export function WinBar({ a, status, fen }) {
   const w = a?.win ?? null;
   const note = status.state === "disabled" ? status.reason : status.state === "loading" ? "엔진 준비 중…"
-    : status.pending ? `분석 중 (${status.pending}개 남음)` : a ? `깊이 ${a.depth}` : "";
+    : status.pending ? `분석 중 (${status.pending}개 남음)` : a ? `깊이 ${a.depth}${status.deepening ? " · 계속 분석 중" : ""}` : "";
   return (
     <div data-testid="winbar" data-nnue={status.nnue} data-cho-win={w != null ? w.toFixed(1) : ""} data-fen={a ? fen : ""} style={{ margin: "6px 0 4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700 }}>
@@ -77,6 +78,7 @@ export default function Janggi() {
   // 자리(위/아래)별 설정: 두는 이는 즉시, 나라·상차림은 새 게임부터. 난이도도 새 게임부터.
   const [seats, setSeats] = useState(() => seatsOf(g));
   const [level, setLevel] = useState(g.level);
+  const [prefs, setPrefs] = useState(() => loadPrefs()); // 보기 설정(분석 모드): 즉시 적용, 새로고침해도 기억
   const [saveError, setSaveError] = useState(session.error);
   const [corrupted, setCorrupted] = useState(session.corrupted);
   const [sel, setSel] = useState(null);
@@ -95,7 +97,8 @@ export default function Janggi() {
   const gRef = useRef(g);
   gRef.current = g;
   // 분석 대상: 복기 중이면 그 판(빈 평가를 자동으로 채운다), 아니면 진행 중인 판.
-  const analysis = useAnalysis(review ? review.state : g);
+  // "계속" 모드는 보고 있는 국면을 깊게 본다: 복기면 k수째, 대국이면 마지막 국면.
+  const analysis = useAnalysis(review ? review.state : g, { mode: prefs.analysis, deepen: review ? review.k : null });
   const { serviceRef } = analysis;
 
   // 판에 그릴 국면: 진행 중인 판, 또는 복기 중인 판의 k수째.
@@ -291,6 +294,10 @@ export default function Janggi() {
   // 나라(연동)·상차림은 다음 판 설정만 바꾼다.
   const changeNation = (seat, nation) => setSeats((s) => chooseNation(s, seat, nation));
   const changeSetup = (seat, setup) => setSeats((s) => ({ ...s, [seat]: { ...s[seat], setup } }));
+  function changeAnalysis(mode) {
+    const next = { ...prefs, analysis: mode };
+    setPrefs(next); savePrefs(next);
+  }
   function restart() {
     setSel(null); setDrag(null); setCorrupted(null);
     setG(session.store.newGame({ ...nextGame(seats), level }));
@@ -449,6 +456,7 @@ export default function Janggi() {
         {review ? <ReviewPanel rows={rows} k={review.k} n={review.record.moves.length} setK={setK} evals={analysis.evals} onExit={exitReview} /> : <>
         <SettingsPanel seats={seats} nowBottom={bottomOf(g)} pending={pendingOf(seats, level, g)} level={level}
           maxReason={analysis.status.state !== "ready" ? analysis.status.reason || "엔진 준비 중…" : null}
+          analysisMode={prefs.analysis} onAnalysis={changeAnalysis}
           onNation={changeNation} onWho={changeWho} onSetup={changeSetup} onLevel={setLevel} />
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12 }}>
           <label style={{ ...btn, fontSize: 13, cursor: networkBusy ? "wait" : "pointer" }}>

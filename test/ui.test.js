@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import Janggi from "../src/Janggi.jsx";
+import Janggi, { WinBar } from "../src/Janggi.jsx";
 
 const id = "2026-09-28T14-03-12-345";
 const record = { v: 1, id, createdAt: "2026-09-28T14:03:12.345Z", controllers: { c: "human", h: "human" },
@@ -98,5 +98,33 @@ describe("board coordinates (user request 2026-09-29)", () => {
     const html = render();
     expect(labels(html, "file").join("")).toBe("ihgfedcba");
     expect(labels(html, "rank")).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+  });
+});
+
+describe("deeper analysis settings (user request 2026-09-29)", () => {
+  const modeSelect = (html) => /<select[^>]*aria-label="분석"[^>]*>(.*?)<\/select>/.exec(html)?.[1];
+  it("offers fast / deep / continuous analysis with continuous selected by default", () => {
+    vi.stubGlobal("localStorage", fake());
+    const options = modeSelect(render());
+    expect([...options.matchAll(/<option value="(\w+)"/g)].map((m) => m[1])).toEqual(["fast", "deep", "continuous"]);
+    expect(options).toMatch(/<option value="fast">빠르게/);
+    expect(options).toMatch(/<option value="deep">깊게/);
+    expect(options).toMatch(/<option value="continuous" selected="">계속/);
+  });
+  it("restores the remembered mode from janggi.prefs", () => {
+    vi.stubGlobal("localStorage", fake({ "janggi.prefs": '{"analysis":"fast"}' }));
+    expect(modeSelect(render())).toMatch(/<option value="fast" selected="">빠르게/);
+  });
+  it("tells that the analysis mode applies immediately (not from the next game)", () => {
+    vi.stubGlobal("localStorage", fake());
+    expect(render()).toContain("두는 이(사람/엔진)와 분석은 고르는 즉시 바뀌어요.");
+  });
+  it("shows the depth and 'continuous analysis' on the win bar while deepening", () => {
+    const bar = (status) => renderToStaticMarkup(createElement(WinBar, { a: { win: 55, depth: 18 }, fen: "f",
+      status: { state: "ready", pending: 0, nnue: "on", ...status } }));
+    expect(bar({ deepening: true })).toContain("깊이 18 · 계속 분석 중");
+    expect(bar({ deepening: false })).toContain("깊이 18<");
+    expect(bar({ deepening: false })).not.toContain("계속 분석 중");
+    expect(bar({ pending: 2, deepening: false })).toContain("분석 중 (2개 남음)");
   });
 });

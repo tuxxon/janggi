@@ -4,6 +4,7 @@ import { bestMove, inCheck, kingIdx } from "../engine.js";
 import { play, legalMoves } from "../game.js";
 import { forbiddenMove } from "../repetition.js";
 import { bestMoveExcluding } from "../engineMove.js";
+import { MOVETIME } from "./service.js";
 
 // 반복수로 막힌 수가 있는 국면만 Fairy-Stockfish 루트 수를 제한한다(엔진은 FEN 만 받아 수순을 모른다).
 // 쉬기는 FSF 표기(궁이 제자리로 가는 수)로 넣는다.
@@ -36,7 +37,9 @@ export function syncAnalysisCache(cache, game) {
 export function cacheEvaluation(cache, game, result) {
   if (result.gameId !== game.id || analysisPositions(game)[result.ply]?.fen !== result.fen) return cache;
   cache = syncAnalysisCache(cache, game);
-  const engine = `fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=${result.nnue === "on" ? "janggi-9991472750de" : "off"} movetime=800 max-movetime=1000`;
+  const mode = result.mode ?? "fast";
+  const engine = `fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=${result.nnue === "on" ? "janggi-9991472750de" : "off"} mode=${mode} ` +
+    `movetime=${MOVETIME[mode]}${mode === "continuous" ? ` deepen-movetime=${MOVETIME.deepen}` : ""} max-movetime=${MOVETIME.max} threads=${result.threads ?? 1}`;
   // 다른 엔진 설정(신경망 켜고 끔)으로 만든 평가도 버리지 않는다. 버리면 저장된 평가를 건너뛰는(known) 서비스가
   // 그 국면을 다시 채우지 않아 그래프·실수 표시가 영구히 빈다(리뷰 HIGH). engine 은 가장 최근 설정을 적는다.
   const evals = cache.fens.map((_, ply) => cache.analysis?.evals[ply] ?? null);

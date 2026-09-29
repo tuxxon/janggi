@@ -38,10 +38,13 @@ export async function loadEngine({ onError = () => {} } = {}) {
   });
 }
 
+// 엔진 스레드: 코어의 절반(1~8). 나머지는 화면과 원본 엔진(메인 스레드)에 남긴다.
+export const threadsFor = (cores) => Math.min(8, Math.max(1, Math.floor((cores || 0) / 2)));
+
 export function createAnalyzer(options = {}) {
   const networks = createNetworkStore();
   const service = createAnalysisService({ createEngine: loadEngine, loadNetwork: () => networks.load(),
-    networkName: NNUE.name, ...options });
+    networkName: NNUE.name, threads: threadsFor(globalThis.navigator?.hardwareConcurrency), hash: 64, ...options });
   return { ...service,
     // Preserve the live accessor when wrapping the service.
     get status() { return service.status; },

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { createAnalyzer, ISOLATION_REASON } from "./fsf.js";
 import { analysisPositions, cacheEvaluation, syncAnalysisCache } from "./gameAnalysis.js";
 
-export function useAnalysis(game) {
+// mode: 분석 모드(fast·deep·continuous). deepen: 깊게 볼 국면(복기의 k수째), null 이면 마지막 국면.
+export function useAnalysis(game, { mode = "fast", deepen = null } = {}) {
   const latest = useRef(game);
   latest.current = game;
   const serviceRef = useRef(null);
@@ -39,6 +40,9 @@ export function useAnalysis(game) {
     const evals = cacheRef.current.analysis?.evals;
     serviceRef.current.sync(game.id, analysisPositions(game, { restrictions: true }).map((p) => evals?.[p.ply] ? { ...p, known: evals[p.ply] } : p));
   }, [game]);
+  // 모드는 마운트 직후(엔진이 뜨기 전)에도 이 효과로 맞춘다. 동기화 뒤에 둔다: 새 판의 국면으로 깊게 볼 대상을 고른다.
+  useEffect(() => { serviceRef.current.setMode(mode); }, [mode]);
+  useEffect(() => { serviceRef.current.deepen(deepen); }, [deepen]);
   // Render immediately against the new game, even before the synchronization effect runs.
   const view = syncAnalysisCache(cache.id === game.id ? cache : cachesRef.current.get(game.id) ?? null, game);
   const ply = game.moves.length;

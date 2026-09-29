@@ -25,9 +25,9 @@ describe("game analysis integration", () => {
     expect(cache.analysis.evals).toEqual([{ ply: 0, cp: 0, win: 50, depth: 12 }, null]);
     expect(cache.analysis.engine).toContain("nnue=off");
     expect(cache.analysis.engine).toContain("movetime=800");
-    const ply1 = { ...r, ply: 1, fen: integration.analysisPositions(g)[1].fen, cp: -190, win: 33.22, movetime: 1000 };
+    const ply1 = { ...r, ply: 1, fen: integration.analysisPositions(g)[1].fen, cp: -190, win: 33.22, movetime: 3000 };
     cache = integration.cacheEvaluation(cache, g, ply1);
-    expect(cache.analysis.engine).toContain("max-movetime=1000");
+    expect(cache.analysis.engine).toContain("max-movetime=3000");
     const old = g;
     g = play(undo(g), [56, 47]);
     cache = integration.syncAnalysisCache(cache, g);
@@ -35,6 +35,17 @@ describe("game analysis integration", () => {
     expect(integration.cacheEvaluation(cache, g, ply1)).toBe(cache);
     expect(integration.cacheEvaluation(cache, old, { ...r, gameId: "other" })).toBe(cache);
     expect(integration.syncAnalysisCache(cache, { ...initial(), id: "new" }).analysis).toBeUndefined();
+  });
+  it("writes the analysis mode, its search times and the thread count into the engine string (user request 2026-09-29)", () => {
+    const g = play(initial(), [54, 45]);
+    const base = { gameId: g.id, fen: integration.analysisPositions(g)[0].fen, ply: 0, cp: 0, win: 50, depth: 20, candidates: [] };
+    const engine = (result) => integration.cacheEvaluation(integration.syncAnalysisCache(null, g), g, { ...base, ...result }).analysis.engine;
+    expect(engine({ nnue: "on", mode: "continuous", threads: 7, movetime: 20000 })).toBe(
+      "fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=janggi-9991472750de mode=continuous movetime=800 deepen-movetime=20000 max-movetime=3000 threads=7");
+    expect(engine({ nnue: "off", mode: "deep", threads: 4, movetime: 3000 })).toBe(
+      "fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=off mode=deep movetime=3000 max-movetime=3000 threads=4");
+    expect(engine({ nnue: "off", mode: "fast", threads: 1, movetime: 800 })).toBe(
+      "fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=off mode=fast movetime=800 max-movetime=3000 threads=1");
   });
   it("validates a max move through game.play and explicitly rejects an illegal result", async () => {
     expect(integration.engineTurn).toBeTypeOf("function");

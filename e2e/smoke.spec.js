@@ -153,7 +153,7 @@ test("최강은 엔진 차례에 합법 수를 두고 그 탐색을 기보 분�
   // replay calls the original game.play legality checks, including voluntary pass.
   expect(replay(saved).state.turn).toBe("c");
   await expect.poll(async () => (await latestRecord(page))?.analysis?.evals.map((e) => e?.ply), { timeout: 30_000 }).toEqual([0, 1, 2]);
-  expect((await latestRecord(page)).analysis.engine).toContain("max-movetime=1000");
+  expect((await latestRecord(page)).analysis.engine).toContain("max-movetime=3000");
   await expect(page.getByText("내 차례예요 · 초(파랑)", { exact: true })).toBeVisible();
 });
 

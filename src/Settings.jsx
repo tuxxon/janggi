@@ -1,5 +1,5 @@
-// 설정 패널: 위/아래 자리마다 나라·두는 이·상차림, 그리고 난이도.
-// 두는 이는 고르는 즉시 지금 판에 적용되고, 나라·상차림·난이도는 새 게임부터 적용된다(바뀐 것은 목록으로 알려 준다).
+// 설정 패널: 위/아래 자리마다 나라·두는 이·상차림, 그리고 난이도와 분석.
+// 두는 이와 분석은 고르는 즉시 적용되고, 나라·상차림·난이도는 새 게임부터 적용된다(바뀐 것은 목록으로 알려 준다).
 import { SETUPS } from "./engine.js";
 import { nationAt } from "./seats.js";
 
@@ -35,7 +35,7 @@ function Seat({ seat, seats, nowBottom, onNation, onWho, onSetup }) {
   );
 }
 
-export function SettingsPanel({ seats, nowBottom, pending, level, maxReason, onNation, onWho, onSetup, onLevel }) {
+export function SettingsPanel({ seats, nowBottom, pending, level, maxReason, analysisMode, onNation, onWho, onSetup, onLevel, onAnalysis }) {
   const waiting = [pending.nation && "나라", pending.top && "위 상차림", pending.bottom && "아래 상차림", pending.level && "난이도"].filter(Boolean);
   return (
     <section data-testid="settings" aria-label="설정" style={{ background: "#e2dccf", borderRadius: 10, padding: "10px 12px 12px" }}>
@@ -52,6 +52,13 @@ export function SettingsPanel({ seats, nowBottom, pending, level, maxReason, onN
         </select>
         {maxReason && <span>최강: {maxReason}</span>}
       </label>
+      <label style={{ ...lab, marginTop: 10 }}>분석(승률)
+        <select aria-label="분석" style={selStyle} value={analysisMode} onChange={(e) => onAnalysis(e.target.value)}>
+          <option value="fast">빠르게 · 0.8초</option>
+          <option value="deep">깊게 · 3초</option>
+          <option value="continuous">계속 · 다음 수까지 최대 20초</option>
+        </select>
+      </label>
       {/* 알림 영역은 항상 둔다: 내용이 든 채로 새로 끼워 넣은 status 는 스크린리더가 읽지 않을 수 있다(리뷰 LOW). */}
       <div role="status" aria-live="polite">
         {waiting.length > 0 && (
@@ -61,7 +68,7 @@ export function SettingsPanel({ seats, nowBottom, pending, level, maxReason, onN
         )}
       </div>
       <p style={{ fontSize: 12, color: "#65584a", margin: "10px 0 0", lineHeight: 1.6 }}>
-        두는 이(사람/엔진)는 고르는 즉시 바뀌어요. 나라·상차림·난이도는 새 게임을 누르면 적용돼요. 선수는 항상 초나라예요.
+        두는 이(사람/엔진)와 분석은 고르는 즉시 바뀌어요. 나라·상차림·난이도는 새 게임을 누르면 적용돼요. 선수는 항상 초나라예요.
       </p>
     </section>
   );

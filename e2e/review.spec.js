@@ -8,7 +8,8 @@ const rec = (id, createdAt, extra) => ({ v: 1, id, createdAt, setups: { c: "마�
 // 지난 판: 초 a4a5(+2) · 한 a7a6(−28 실수) · 초 c4c5(−35 대실수). evals 는 초 기준 승률.
 const old = rec(OLD, "2026-09-27T10:00:00.000Z", { moves: ["a4a5", "a7a6", "c4c5"], analysis: { engine: "seed",
   evals: [{ ply: 0, cp: 0, win: 50, depth: 10 }, { ply: 1, cp: 22, win: 52, depth: 10 }, { ply: 2, cp: 380, win: 80, depth: 10 }, { ply: 3, cp: -54, win: 45, depth: 10 }] } });
-const live = rec(LIVE, "2026-09-28T10:00:00.000Z", { moves: ["e4e5"] });
+// 진행 중인 판은 사람끼리: 엔진(한) 차례로 두면 열자마자·복기에서 돌아오자마자 420ms 뒤에 엔진이 둬서 판 비교가 경합한다.
+const live = rec(LIVE, "2026-09-28T10:00:00.000Z", { moves: ["e4e5"], controllers: { c: "human", h: "human" } });
 
 async function seed(page, records) {
   await openIsolated(page);
@@ -51,7 +52,8 @@ test("지난 판을 열어 버튼·방향키·수순·그래프로 이동하고,
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(0)).toContainText("+2%p");
   await expect(rows.nth(1)).toContainText("−28%p 실수 ?");
-  await expect(rows.nth(2)).toContainText("−35%p 대실수 ??");
+  // 마지막 국면은 복기에서도 항상 다시 탐색한다(후보 수용). 여러 스레드 탐색은 매번 값이 조금 달라서 심은 −35 가 흔들린다.
+  await expect(rows.nth(2)).toContainText(/−3\d%p 대실수 \?\?/);
   await rows.nth(1).click();
   await expect(status(page)).toHaveText("복기 중 · 2/3수");
 
