@@ -23,10 +23,11 @@ const deferred = () => {
 };
 // 감시 타이머는 탐색 시간 + RESPONSE_TIMEOUT: 20초 깊게 보기가 "응답 없음"으로 끝나지 않게.
 const RESPONSE_TIMEOUT = 15000, NETWORK_TIMEOUT = 20000;
-// 무제한(go infinite) 깊게 보기의 감시: 엔진 줄이 이 시간 동안 하나도 오지 않으면 실패. 줄이 올 때마다 다시 건다.
-// max(60초, 가장 긴 줄 간격 × 3). 실측(2026-09-30, M3 Max, WASM 1.1.12 Node, 중반 국면, MultiPV 1, 신경망 없음, Hash 256,
-// 5분 go infinite): 1스레드 97.6초(깊이 31 의 첫 수, 줄 1143개), 4스레드 68.1초(깊이 33 의 첫 수, 줄 922개) → 97.6 × 3.
-const SILENCE_TIMEOUT = 293000;
+// 무제한(go infinite) 깊게 보기의 감시: PROBE_INTERVAL 마다 isready 를 보내 RESPONSE_TIMEOUT 안에 readyok 가 없으면 실패.
+// 엔진 줄 간격으로는 감시할 수 없다 — 깊이가 깊어질수록 한 반복의 첫 수를 읽는 동안 줄이 없다. 실측(2026-09-30, M3 Max,
+// WASM 1.1.12 Node, 중반 국면, MultiPV 1, 신경망 없음, Hash 256): 5분에 가장 긴 간격 1스레드 97.6초·4스레드 68.1초,
+// 30분에는 622.6초·351.8초까지 벌어졌다. 탐색 중 isready 의 readyok 는 0.3~0.4ms 에 왔다.
+const PROBE_INTERVAL = 30000;
 export const MODES = ["fast", "deep", "continuous"];
 // 카카오식 반복수를 아는 변형: janggicasual(빅장·점수 판정 없음) + 반복 금지. janggicasual 은 반복을 무승부로 읽어서
 // 지고 있는 쪽이 반복으로 버틸 수 있다고 계산했다(사용자 보고 2026-09-29). nFoldRule 4 는 FSF janggimodern 과 같다
@@ -66,11 +67,22 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     if (!disposed) onStatus(status);
   }
   const send = (command) => engine.postMessage(command);
-  const wantedHash = () => (deepCap !== null && deepCap >= LONG_CAP ? LONG_HASH : hash);
+  // Hash 256 은 긴 상한의 2단계가 실제로 돌 수 있는 동안만(계속 모드): WASM 메모리는 한 번 늘면 줄지 않는다.
+  const wantedHash = () => (mode === "continuous" && deepCap !== null && deepCap >= LONG_CAP ? LONG_HASH : hash);
   function watch(ms) {
     const gen = generation;
     clearTimeout(timer);
     timer = setTimeout(() => { if (gen === generation) void fail(new Error("엔진 탐색 응답 시간이 초과됐어요.")); }, ms);
+  }
+  // 무제한 탐색의 탐침: 그 탐색이 달리는 동안(멈추지 않았고 bestmove 전) PROBE_INTERVAL 마다 isready 하나. 예약은 공용
+  // timer 라 stop(→ bestmove 기한)·bestmove·실패가 지운다. 멈춘 뒤에 온 답은 다시 예약하지 않는다(그 기한을 지우지 않게).
+  function probe(job) {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const gen = generation;
+      exchange("isready", "readyok").then(() => { if (gen === generation && active === job && !job.cancelled) probe(job); },
+        (error) => { if (gen === generation) void fail(error); });
+    }, PROBE_INTERVAL);
   }
   function exchange(command, response) {
     return new Promise((resolve, reject) => {
@@ -79,7 +91,9 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
         clearTimeout(timeout); waiters.delete(waiter);
         if (error) reject(error); else resolve();
       };
-      const waiter = { receive: (line) => { if (line === response) finish(); }, reject: finish };
+      // 응답 줄은 그것을 기다리는 가장 오래된 대기자 하나만 가져간다(엔진은 받은 순서대로 답한다): 탐침의 readyok 가
+      // 뒤이은 신경망·Hash 변경의 isready 를 대신 확인하지 않게.
+      const waiter = { receive: (line) => line === response && (finish(), true), reject: finish };
       waiters.add(waiter);
       try { send(command); } catch (error) { finish(error); }
     });
@@ -87,14 +101,18 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   function stop() {
     if (active && !active.cancelled) {
       active.cancelled = true;
+      // 무제한은 상한이 없으니 멈춘 뒤에는 bestmove 를 RESPONSE_TIMEOUT 안에 받아야 한다(다음 탐침은 이것이 지운다).
+      if (active.movetime === Infinity) watch(RESPONSE_TIMEOUT);
       try { send("stop"); } catch (error) { void fail(error); }
     }
   }
   const stopDeepening = () => { if (active?.deepen) { stop(); publish(); } };
   const deepenTarget = () => {
     const entry = deepenPly === null ? entries.at(-1) : entries.find((e) => e.ply === deepenPly);
-    // 최강 차례는 깊게 보지 않는다(그 탐색이 곧 엔진의 수다). 1차 분석이 끝난 국면만.
-    return mode === "continuous" && entry?.result && !entry.max && !entry.error && !entry.capped ? entry : null;
+    // 최강 차례는 깊게 보지 않는다(그 탐색이 곧 엔진의 수다). 1차 분석이 끝난 국면만. 끝난 국면(mate 0, 둘 수 없음)은
+    // 2단계로 보지 않는다: 엔진이 go infinite 에서 stop 을 기다리며 코어 하나를 계속 돌린다(실측, 개정 2.10).
+    return mode === "continuous" && entry?.result && !entry.max && !entry.error && !entry.capped &&
+      (deepCap === null || entry.result.mate !== 0) ? entry : null;
   };
   function cancelFocus() {
     if (!focus) return;
@@ -170,8 +188,8 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       : focus ? { entry: focus.entry, focus, movetime: MOVETIME.focus }
       : { entry: target, deepen: true, movetime: deepCap ?? MOVETIME.deepen, ...(deepCap !== null ? { cap: deepCap } : {}) };
     active = { ...job, gameId, mode, lines: new Map(), cancelled: false };
-    // 무제한은 끝이 없으므로 무응답 감시(줄이 올 때마다 다시 건다, receive). 상한이 있으면 상한 + 여유.
-    watch(job.movetime === Infinity ? SILENCE_TIMEOUT : job.movetime + RESPONSE_TIMEOUT);
+    // 무제한은 끝이 없으므로 isready 탐침으로 감시한다. 상한이 있으면 상한 + 여유.
+    if (job.movetime === Infinity) probe(active); else watch(job.movetime + RESPONSE_TIMEOUT);
     try {
       // 최강 수와 2단계는 MultiPV 1: 후보 5개를 함께 탐색하면 최선수에 쓸 시간이 나뉘어 약해진다(리뷰, 개정 2.10 실측).
       send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : job.entry.max || job.cap !== undefined ? 1 : 5}`);
@@ -219,14 +237,13 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   }
   function receive(line) {
     if (typeof line !== "string") { void fail(line); return; }
-    for (const waiter of [...waiters]) waiter.receive(line);
+    for (const waiter of [...waiters]) if (waiter.receive(line)) break;
     if (active && !active.cancelled && line.startsWith("info string NNUE evaluation using")) {
       status = { ...status, nnue: "on" }; publish();
     } else if (active && !active.cancelled && line.startsWith("info string classical evaluation")) {
       status = { ...status, nnue: "off" }; publish();
     }
     if (!active) return;
-    if (active.movetime === Infinity) watch(SILENCE_TIMEOUT);
     const parsed = info(line);
     if (parsed) {
       active.lines.set(parsed.rank, parsed); active.ranks = Math.max(active.ranks ?? 0, parsed.rank);

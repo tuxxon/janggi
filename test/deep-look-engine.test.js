@@ -1,6 +1,6 @@
 // 복기 깊게 보기(개정 2.10)를 실엔진(WASM 1.1.12, Node)으로 확인한다: Hash 256 을 받는지, go infinite 가 stop 으로 끝나는지,
 // 같은 시간에 MultiPV 1 이 5 보다 깊은지, 그리고 서비스가 실엔진 줄로 2단계를 도는지.
-// 무제한 무응답 감시의 기준 시간(service.js SILENCE_TIMEOUT)은 테스트가 아니라 5분 측정 스크립트로 정했다(보고서).
+// 무제한 감시는 isready 탐침이다(service.js PROBE_INTERVAL): 줄 간격은 30분 측정에서 622초까지 벌어져 감시가 될 수 없었다(보고서).
 import { describe, it, expect, beforeAll } from "vitest";
 import { createRequire } from "node:module";
 import { KAKAO, createAnalysisService } from "../src/analysis/service.js";
@@ -56,15 +56,27 @@ describe("review deep look on the real engine (spec 2.10)", () => {
     expect(out.at(-1)).toMatch(/^bestmove [a-i]\d+[a-i]\d+/);
     expect(evaluatedDepth(out)).toBeGreaterThan(5);
   });
-  it("go infinite keeps searching until stop, then answers bestmove", async () => {
+  it("go infinite keeps searching until stop, answers isready meanwhile (the service's probe), then answers bestmove", async () => {
     sf.postMessage("setoption name MultiPV value 1");
     sf.postMessage(`position fen ${MIDDLEGAME}`);
     const start = lines.length;
     sf.postMessage("go infinite");
     await new Promise((resolve) => setTimeout(resolve, 1500));
+    const t0 = Date.now();
+    await send("isready", "readyok", 1_000);
+    expect(Date.now() - t0).toBeLessThan(1_000);
     expect(lines.slice(start).some((l) => l.startsWith("bestmove"))).toBe(false);
     const out = await send("stop", "bestmove", 5_000);
     expect(out.at(-1)).toMatch(/^bestmove [a-i]\d+[a-i]\d+/);
+  });
+  it("on a finished (mated) position go infinite withholds bestmove until stop — why the service skips stage 2 there", async () => {
+    // 무작위 대국의 외통수 끝 국면(초 차례, 둘 수 없음). 엔진은 stop 을 기다리며 코어 하나를 계속 돌린다(측정: 3초에 CPU 3.0초).
+    sf.postMessage("position fen 2naan3/5k3/4c1N2/1P1b3pb/2p3c2/9/3r5/9/3KC2C1/3AA2B1 w - - 0 1");
+    const start = lines.length;
+    sf.postMessage("go infinite");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(lines.slice(start).filter((l) => !l.startsWith("info string"))).toEqual(["info depth 0 score mate 0"]);
+    expect((await send("stop", "bestmove", 5_000)).at(-1)).toBe("bestmove (none)");
   });
   it("in the same 3 s MultiPV 1 reads deeper than MultiPV 5 (middlegame)", async () => {
     const depthWith = async (multipv) => {

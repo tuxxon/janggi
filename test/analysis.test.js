@@ -1036,22 +1036,91 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     expect(hashes(engines[1])).toEqual(["setoption name Hash value 256"]);
     expect(engines[1].searches).toEqual(["go movetime 800"]);
   });
-  it("the unlimited cap is watched by silence: every engine line re-arms 293 s, and 293 s without a line fails", async () => {
+  // 무제한은 줄 간격으로 감시할 수 없다(30분 실측: 정상 탐색의 줄 간격이 1스레드 622초·4스레드 352초) → 30초마다 isready.
+  const starts = (engine) => engine.commands.filter((c) => c === "uci").length;
+  const probes = (engine) => engine.commands.slice(engine.commands.lastIndexOf("go infinite") + 1).filter((c) => c === "isready").length;
+  const silentReady = (engine) => { const post = engine.postMessage; engine.postMessage = (c) => { if (c === "isready") engine.commands.push(c); else post(c); }; };
+  async function unlimited() {
     vi.useFakeTimers();
+    const s = setup({ mode: "continuous", hash: 64 });
+    s.service.sync("g", [position(0)]); s.service.deepen(0, Infinity);
+    await vi.advanceTimersByTimeAsync(0); await s.service.ready;
+    firstPass(s.engine); await vi.advanceTimersByTimeAsync(0);
+    expect(s.engine.searches.at(-1)).toBe("go infinite");
+    return s;
+  }
+  it("the unlimited deep look sends isready every 30 s and, answered, stays alive past 30 minutes without a single engine line", async () => {
+    const { service, engine } = await unlimited();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(probes(engine)).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(probes(engine)).toBe(1);
+    await vi.advanceTimersByTimeAsync(30 * 60_000 - 30_000);                 // 30분
+    expect(probes(engine)).toBe(60);
+    await vi.advanceTimersByTimeAsync(60_000);                               // 31분
+    expect(probes(engine)).toBe(62);
+    expect(starts(engine)).toBe(1);
+    expect(service.status.deepening).toBe(true);
+  });
+  it("a probe without readyok within 15 s fails the search", async () => {
+    const { engine } = await unlimited();
+    silentReady(engine);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(probes(engine)).toBe(1);
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(starts(engine)).toBe(1);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(starts(engine)).toBe(2);
+  });
+  it("no probe after stop or bestmove", async () => {
+    const { service, engine } = await unlimited();
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(probes(engine)).toBe(1);
+    service.haltDeepen();
+    expect(engine.commands.at(-1)).toBe("stop");
+    await vi.advanceTimersByTimeAsync(10_000);                               // 다음 탐침 차례(60초)가 지나도
+    expect(afterStop(engine)).toEqual([]);
+    engine.emit("bestmove a4a5"); await vi.advanceTimersByTimeAsync(120_000);
+    expect(afterStop(engine)).toEqual([]);
+    expect(starts(engine)).toBe(1);
+  });
+  it("a stopped unlimited search must answer bestmove within 15 s", async () => {
+    const { service, engine } = await unlimited();
+    service.haltDeepen();
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(starts(engine)).toBe(1);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(starts(engine)).toBe(2);
+  });
+  it("a probe answered after stop does not start probing again, and the bestmove deadline still holds", async () => {
+    const { service, engine } = await unlimited();
+    silentReady(engine);
+    await vi.advanceTimersByTimeAsync(30_000);                               // 탐침이 답을 기다리는 중에
+    service.haltDeepen();
+    engine.emit("readyok"); await vi.advanceTimersByTimeAsync(14_999);      // 멈춘 뒤에 온 탐침의 답
+    expect(starts(engine)).toBe(1);
+    expect(afterStop(engine)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(starts(engine)).toBe(2);                                          // bestmove 가 15초 안에 없었다
+  });
+  it("a probe's readyok never confirms another isready (the Hash change right after the search)", async () => {
+    const { service, engine } = await unlimited();                          // Hash 256
+    silentReady(engine);
+    await vi.advanceTimersByTimeAsync(30_000);                               // 탐침 isready 가 답을 기다린다
+    service.deepen(0, 20000);                                                // 멈춤 → 쉬면 Hash 64
+    engine.emit("bestmove a4a5"); await vi.advanceTimersByTimeAsync(0);
+    expect(afterStop(engine)).toEqual(["setoption name Hash value 64", "isready"]);
+    engine.emit("readyok"); await vi.advanceTimersByTimeAsync(0);          // 탐침의 답
+    expect(engine.searches.at(-1)).toBe("go infinite");                      // Hash 변경은 아직 확인되지 않았다
+    engine.emit("readyok"); await vi.advanceTimersByTimeAsync(0);
+    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+  });
+  it("a finished position (mate 0, no moves) gets no second stage: go infinite would wait for stop forever", async () => {
     const { service, engine } = setup({ mode: "continuous", hash: 64 });
-    service.sync("g", [position(0)]); service.deepen(0, Infinity);
-    await vi.advanceTimersByTimeAsync(0); await service.ready;
-    firstPass(engine); await vi.advanceTimersByTimeAsync(0);
-    expect(engine.searches.at(-1)).toBe("go infinite");
-    const starts = () => engine.commands.filter((c) => c === "uci").length;
-    await vi.advanceTimersByTimeAsync(292_000);
-    engine.emit("info depth 31 currmove e1e1 currmovenumber 2");         // 어떤 줄이든 오면 다시 293초
-    await vi.advanceTimersByTimeAsync(292_000);
-    engine.emit(line(31, -61, "a4a5"));
-    await vi.advanceTimersByTimeAsync(292_000);
-    expect(starts()).toBe(1);                                             // 876초가 지났어도 줄이 계속 왔다
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(starts()).toBe(2);                                             // 293초 동안 한 줄도 없으면 실패
+    service.sync("g", [position(0, "h")]); service.deepen(0, Infinity); await service.ready;
+    engine.emit("info depth 0 score mate 0"); engine.emit("bestmove (none)"); await tick();
+    expect(engine.searches).toEqual(["go movetime 800"]);
+    expect(service.status.deepening).toBe(false);
   });
   it("the watchdog of a finite cap is still cap + 15 s", async () => {
     vi.useFakeTimers();
@@ -1060,11 +1129,37 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     await vi.advanceTimersByTimeAsync(0); await service.ready;
     firstPass(engine); await vi.advanceTimersByTimeAsync(0);
     expect(engine.searches.at(-1)).toBe("go movetime 300000");
-    const starts = () => engine.commands.filter((c) => c === "uci").length;
     await vi.advanceTimersByTimeAsync(314_000);
-    expect(starts()).toBe(1);
+    expect(starts(engine)).toBe(1);
+    expect(engine.commands.at(-1)).toBe("go movetime 300000");               // 상한이 있으면 탐침이 없다
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(starts()).toBe(2);
+    expect(starts(engine)).toBe(2);
+  });
+  it("Hash 256 needs the continuous mode: another mode keeps the constructor Hash; switching in raises it, switching out lowers it once when idle", async () => {
+    const { service, engine } = setup({ mode: "fast", hash: 64 });
+    service.sync("g", [position(0)]); service.deepen(0, 60000); await service.ready;
+    expect(hashes(engine)).toEqual(["setoption name Hash value 64"]);
+    firstPass(engine); await tick();
+    expect(engine.searches).toEqual(["go movetime 800"]);                   // 빠르게: 깊게 보지 않으니 64 그대로
+    service.setMode("continuous"); await tick();
+    expect(engine.commands.slice(engine.commands.lastIndexOf("go movetime 800") + 1)).toEqual(["setoption name Hash value 256", "isready",
+      "setoption name MultiPV value 1", "position fen fen-0", "go movetime 60000"]);
+    service.setMode("deep");
+    expect(engine.commands.at(-1)).toBe("stop");
+    expect(hashes(engine)).toHaveLength(2);                                  // 탐색이 달리는 동안은 보내지 않는다
+    engine.emit("bestmove a4a5"); await tick();
+    expect(afterStop(engine)).toEqual(["setoption name Hash value 64", "isready"]);
+    service.setMode("fast"); await tick();
+    expect(hashes(engine)).toHaveLength(3);                                  // 한 번만
+  });
+  it("deepen(ply, null) after a long cap brings the constructor Hash back once", async () => {
+    const { service, engine } = await reviewing(Infinity);
+    expect(hashes(engine)).toEqual(["setoption name Hash value 256"]);
+    service.deepen(0, null);
+    expect(engine.commands.at(-1)).toBe("stop");
+    engine.emit("bestmove a4a5"); await tick();
+    expect(afterStop(engine)).toEqual(["setoption name Hash value 64", "isready",
+      "setoption name MultiPV value 5", "position fen fen-0", "go movetime 20000"]);
   });
   it("rejects a cap that is not 20000, 60000, 300000 or Infinity", () => {
     const { service } = setup({ mode: "continuous" });
