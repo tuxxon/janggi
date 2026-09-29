@@ -37,3 +37,19 @@ describe("notation", () => {
     expect(toFen(b, "h")).toBe("rnba1anbr/4k4/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/4K4/RNBA1ANBR b - - 0 1");
   });
 });
+
+describe("Korean piece names for moves (user request 2026-09-29)", () => {
+  it("names the moving piece and shows from→to; pass is 쉬기", async () => {
+    const { describeMove } = await import("../src/notation.js");
+    const b = newBoard("마상마상", "마상마상");
+    expect(describeMove(b, "b1c3")).toBe("마 b1→c3");
+    expect(describeMove(b, "a1a2")).toBe("차 a1→a2");
+    expect(describeMove(b, "b3b5")).toBe("포 b3→b5");
+    expect(describeMove(b, "c1a4")).toBe("상 c1→a4");
+    expect(describeMove(b, "d1d2")).toBe("사 d1→d2");
+    expect(describeMove(b, "e2e1")).toBe("궁 e2→e1");
+    expect(describeMove(b, "a4a5")).toBe("졸 a4→a5"); // 초의 졸
+    expect(describeMove(b, "a7a6")).toBe("병 a7→a6"); // 한의 병
+    expect(describeMove(b, "pass")).toBe("쉬기");
+  });
+});

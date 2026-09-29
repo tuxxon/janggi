@@ -144,7 +144,10 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     const job = active;
     active = null;
     if (!job.cancelled) {
-      const candidates = [...job.lines].sort(([a], [b]) => a - b).map(([, v]) => v.candidate).filter(Boolean);
+      // 순위별 마지막 줄을 모은다. 탐색이 반복 도중 멈추면 뒤 순위에 이전 깊이의 줄이 남아 같은 수가 두 번 들어갈 수 있다
+      // → 앞 순위(최신) 것만 남긴다.
+      const candidates = [...job.lines].sort(([a], [b]) => a - b).map(([, v]) => v.candidate).filter(Boolean)
+        .filter((c, i, all) => all.findIndex((x) => x.move === c.move) === i);
       if (job.focus) {
         focus = null;
         job.focus.resolve(candidates.filter((c) => job.focus.moves.includes(c.move)));

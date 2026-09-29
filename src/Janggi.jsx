@@ -8,7 +8,7 @@ import { GameList, ReviewPanel } from "./Review.jsx";
 import { SettingsPanel } from "./Settings.jsx";
 import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, withWho } from "./seats.js";
 import { forbiddenMove } from "./repetition.js";
-import { toFen, moveToUci } from "./notation.js";
+import { toFen, moveToUci, describeMove } from "./notation.js";
 import { moveDelta, grade, moverWin } from "./winrate.js";
 import { useAnalysis } from "./analysis/useAnalysis.js";
 import { engineTurn } from "./analysis/gameAnalysis.js";
@@ -345,8 +345,12 @@ export default function Janggi() {
         </label>
         {hints && <div style={{ fontSize: 12, color: "#65584a", marginTop: 4 }}>
           {view.turn === "c" ? "초" : "한"}가 둘 수 · 두는 쪽 승률
-          <ol data-testid="candidates" style={{ display: "flex", flexWrap: "wrap", gap: "4px 20px", paddingLeft: 20, margin: "4px 0" }}>
-            {candidates.map((candidate) => <li key={candidate.move}>{candidate.move === "pass" ? "쉬기" : candidate.move} {Math.round(candidate.win)}%</li>)}
+          <ol data-testid="candidates" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(125px, 1fr))", gap: 4, listStyle: "none", padding: 0, margin: "4px 0" }}>
+            {candidates.map((candidate, k) => (
+              <li key={candidate.move} style={{ background: "#e2dccf", borderRadius: 6, padding: "3px 6px", color: "#261d15" }}>
+                <span aria-hidden="true" style={{ color: "#65584a" }}>{k + 1}. </span>{describeMove(view.b, candidate.move)} <b>{Math.round(candidate.win)}%</b>
+              </li>
+            ))}
           </ol>
           {!candidates.length && <span>상위 5수는 이 국면을 분석한 뒤에 보여요. 기물을 집으면 그 기물의 수마다 승률이 떠요.</span>}
         </div>}
@@ -414,7 +418,7 @@ export default function Janggi() {
                 <Piece p={view.b[drag.i]} x={drag.x} y={drag.y} selected lifted />
               </g>
             )}
-            {hints && <HintLabels candidates={candidates} focused={focusCandidates} targets={targets} turnWin={turnWin}
+            {hints && <HintLabels candidates={candidates} focused={focusCandidates} targets={targets} turnWin={turnWin} board={view.b}
               passSquare={kingIdx(view.b, view.turn)} hovered={drag?.moved ? idxAt(drag.x, drag.y) : null} xy={xy} />}
           </svg>
         </div>

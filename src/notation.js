@@ -39,3 +39,14 @@ export function toFen(b, turn) {
   }
   return `${rows.join("/")} ${turn === "c" ? "w" : "b"} - - 0 1`;
 }
+
+// 수를 한글 기물 이름과 함께 보여준다: "마 g1→f3", 쉬기는 "쉬기". 졸은 초, 병은 한.
+const KO = { K: "궁", R: "차", C: "포", H: "마", E: "상", A: "사" };
+export function describeMove(b, uci) {
+  const move = uciToMove(uci);
+  if (move === "pass") return "쉬기";
+  if (!move) return uci;
+  const p = b[move[0]];
+  const name = !p ? "" : p[1] === "P" ? (p[0] === "c" ? "졸" : "병") : KO[p[1]];
+  return `${name ? name + " " : ""}${sqName(move[0])}→${sqName(move[1])}`;
+}

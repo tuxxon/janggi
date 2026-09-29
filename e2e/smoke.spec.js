@@ -174,6 +174,9 @@ test("후보 수 보기는 선택한 기물의 도착 칸에 승률을 붙이고
   await expect(page.getByTestId("target-win").locator("text").first()).toHaveText(/\d+%/);
   expect(await page.getByTestId("target-win").evaluateAll((els) => els.map((el) => el.dataset.move).sort())).toEqual(["a4a5", "a4b4"]);
   await expect(page.getByTestId("candidates").locator("li")).toHaveCount(5);
+  // 후보 수는 한글 기물 이름과 함께 보인다(사용자 요청 2026-09-29): "마 g1→f3 48%" 또는 "쉬기 12%"
+  for (const text of await page.getByTestId("candidates").locator("li").allInnerTexts())
+    expect(text).toMatch(/^\d\. ((궁|차|포|마|상|사|졸|병) [a-i](10|[1-9])→[a-i](10|[1-9])|쉬기) \d+%$/);
   await clickSq(page, 6, 2);
   await expect(page.getByTestId("target-win")).toHaveCount(3, { timeout: 30_000 });
   expect(await page.getByTestId("target-win").evaluateAll((els) => els.map((el) => el.dataset.move).sort())).toEqual(["c4b4", "c4c5", "c4d4"]);

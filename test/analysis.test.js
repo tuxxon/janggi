@@ -363,3 +363,19 @@ describe("repetition-restricted positions (user request: Kakao Janggi)", () => {
     expect(engine.searches.at(-1)).toBe("go movetime 1000 searchmoves a1a3 e2e2");
   });
 });
+
+describe("candidates from an interrupted MultiPV iteration (found while checking Korean names)", () => {
+  it("never lists the same move twice when a deeper iteration stops part-way", async () => {
+    const { service, engine, results } = setup();
+    service.sync("g", [position(0)]); await service.ready;
+    engine.emit("info depth 10 multipv 1 score cp 30 pv a4b4");
+    engine.emit("info depth 10 multipv 2 score cp 20 pv b1c3");
+    engine.emit("info depth 10 multipv 3 score cp 10 pv g1f3");
+    engine.emit("info depth 11 multipv 1 score cp 40 pv g1f3");   // 11수 반복이 두 줄만 나오고 멈췄다
+    engine.emit("info depth 11 multipv 2 score cp 35 pv a4b4");
+    engine.emit("bestmove g1f3"); await tick();
+    const moves = results[0].candidates.map((c) => c.move);
+    expect(new Set(moves).size).toBe(moves.length);
+    expect(moves.slice(0, 2)).toEqual(["g1f3", "a4b4"]);
+  });
+});
