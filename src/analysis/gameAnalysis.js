@@ -4,10 +4,10 @@ import { bestMove, inCheck, kingIdx } from "../engine.js";
 import { play, legalMoves } from "../game.js";
 import { forbiddenMove } from "../repetition.js";
 import { bestMoveExcluding } from "../engineMove.js";
-import { MOVETIME } from "./service.js";
+import { MOVETIME, KAKAO } from "./service.js";
 
-// 반복수로 막힌 수가 있는 국면만 Fairy-Stockfish 루트 수를 제한한다(엔진은 FEN 만 받아 수순을 모른다).
-// 쉬기는 FSF 표기(궁이 제자리로 가는 수)로 넣는다.
+// 반복수로 막힌 수가 있는 국면은 Fairy-Stockfish 루트 수도 제한한다. 엔진은 이제 수순을 받아 반복수를 스스로 알지만
+// (enginePositions), 루트 제한을 이중 안전장치로 남긴다. 쉬기는 FSF 표기(궁이 제자리로 가는 수)로 넣는다.
 function restriction(state) {
   if (!forbiddenMove(state)) return undefined;
   const moves = legalMoves(state).map(moveToUci);
@@ -15,13 +15,30 @@ function restriction(state) {
   return moves;
 }
 
-// restrictions: 판이 바뀔 때(서비스 동기화)만 계산한다 — 렌더마다 모든 국면의 반복수를 보지 않게.
-export const analysisPositions = (game, { restrictions = false } = {}) => [...game.hist, game].map((state, ply) => {
-  const searchmoves = restrictions ? restriction(state) : undefined;
-  return { ply, fen: toFen(state.b, state.turn), turn: state.turn,
-    max: ply === game.moves.length && !game.over && game.level === "max" && game.controllers[game.turn] === "engine",
-    ...(searchmoves ? { searchmoves } : {}) };
-});
+// 엔진에 보낼 국면 명령: 마지막 쉬기(자동 쉬기 포함) 이후의 수순과 함께 보낸다. 반복 금지 변형(service.js KAKAO)이
+// 수읽기 안에서도 반복수를 알게 하려는 것이다(사용자 보고 2026-09-29: 반복을 무승부로 읽어 지는 수를 권했다).
+// 쉬기 너머는 보내지 않는다: 쉬기가 끼면 셈이 끊기는 것이 우리 규칙인데 FSF 는 쉬기 너머까지 센다(실측: 한이 쉰 뒤
+// 초의 a1a2 를 전체 수순으로 보내면 FSF 가 금지로 본다). 자동 쉬기는 "같은 편이 연달아 둔 두 수"로 알아본다.
+export function enginePositions(states, moves) {
+  let start = 0;
+  return states.map((state, ply) => {
+    if (ply > 0 && (moves[ply - 1] === "pass" || state.turn === states[ply - 1].turn)) start = ply;
+    const from = states[start];
+    return `position fen ${toFen(from.b, from.turn)}${ply > start ? " moves " + moves.slice(start, ply).join(" ") : ""}`;
+  });
+}
+
+// restrictions: 판이 바뀔 때(서비스 동기화)만 계산한다 — 렌더마다 모든 국면의 반복수·수순을 보지 않게.
+export const analysisPositions = (game, { restrictions = false } = {}) => {
+  const states = [...game.hist, game];
+  const commands = restrictions ? enginePositions(states, game.moves) : null;
+  return states.map((state, ply) => {
+    const searchmoves = restrictions ? restriction(state) : undefined;
+    return { ply, fen: toFen(state.b, state.turn), turn: state.turn,
+      max: ply === game.moves.length && !game.over && game.level === "max" && game.controllers[game.turn] === "engine",
+      ...(searchmoves ? { searchmoves } : {}), ...(commands ? { position: commands[ply] } : {}) };
+  });
+};
 
 export function syncAnalysisCache(cache, game) {
   const fens = analysisPositions(game).map((p) => p.fen);
@@ -38,7 +55,7 @@ export function cacheEvaluation(cache, game, result) {
   if (result.gameId !== game.id || analysisPositions(game)[result.ply]?.fen !== result.fen) return cache;
   cache = syncAnalysisCache(cache, game);
   const mode = result.mode ?? "fast";
-  const engine = `fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=${result.nnue === "on" ? "janggi-9991472750de" : "off"} mode=${mode} ` +
+  const engine = `fairy-stockfish-nnue.wasm 1.1.12 ${KAKAO.name} nnue=${result.nnue === "on" ? "janggi-9991472750de" : "off"} mode=${mode} ` +
     `movetime=${MOVETIME[mode]}${mode === "continuous" ? ` deepen-movetime=${MOVETIME.deepen}` : ""} max-movetime=${MOVETIME.max} threads=${result.threads ?? 1}`;
   // 다른 엔진 설정(신경망 켜고 끔)으로 만든 평가도 버리지 않는다. 버리면 저장된 평가를 건너뛰는(known) 서비스가
   // 그 국면을 다시 채우지 않아 그래프·실수 표시가 영구히 빈다(리뷰 HIGH). engine 은 가장 최근 설정을 적는다.

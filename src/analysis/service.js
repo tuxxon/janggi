@@ -22,6 +22,11 @@ const deferred = () => {
 // 감시 타이머는 탐색 시간 + RESPONSE_TIMEOUT: 20초 깊게 보기가 "응답 없음"으로 끝나지 않게.
 const RESPONSE_TIMEOUT = 15000, NETWORK_TIMEOUT = 20000;
 export const MODES = ["fast", "deep", "continuous"];
+// 카카오식 반복수를 아는 변형: janggicasual(빅장·점수 판정 없음) + 반복 금지. janggicasual 은 반복을 무승부로 읽어서
+// 지고 있는 쪽이 반복으로 버틸 수 있다고 계산했다(사용자 보고 2026-09-29). nFoldRule 4 는 FSF janggimodern 과 같다
+// (반복 금지보다 n번 반복 무승부가 먼저 걸리지 않게). 수순은 gameAnalysis.enginePositions 가 붙인다.
+export const KAKAO = { name: "janggikakao", path: "/janggi-kakao.ini",
+  ini: "[janggikakao:janggicasual]\nmoveRepetitionIllegal = true\nnFoldRule = 4\n" };
 export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 20000, max: 3000, focus: 500 };
 function checkMode(mode) {
   if (!MODES.includes(mode)) throw new Error(`알 수 없는 분석 모드예요: ${mode}`);
@@ -107,8 +112,11 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   }
   function writeNetwork() {
     if (network) {
-      engine.FS.writeFile("/" + networkName, network);
-      send(`setoption name EvalFile value /${networkName}`);
+      // FSF 는 파일 이름이 변형 이름(또는 별칭)으로 시작하는 신경망만 쓴다. ini 로 정의한 변형은 부모의 "janggi" 별칭을
+      // 잃는다(Variant::init 이 비운다) → 엔진 안의 파일 이름 앞에 변형 이름을 붙인다. 판·기물이 같아 신경망은 그대로 맞는다.
+      const path = `/${KAKAO.name}-${networkName}`;
+      engine.FS.writeFile(path, network);
+      send(`setoption name EvalFile value ${path}`);
     }
     send(`setoption name Use NNUE value ${network ? "true" : "false"}`);
     status = { ...status, nnue: "off" };
@@ -142,7 +150,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     try {
       // 최강 수는 MultiPV 1: 후보 5개를 함께 탐색하면 최선수에 쓸 시간이 나뉘어 약해진다(리뷰).
       send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : job.entry.max ? 1 : 5}`);
-      send(`position fen ${job.entry.fen}`);
+      send(job.entry.position ?? `position fen ${job.entry.fen}`);
       // 반복수로 막힌 수가 있는 국면은 루트 수를 제한한다(searchmoves). 초점 분석은 원래 그 기물의 수만 본다.
       const roots = job.focus ? job.focus.moves : job.entry.searchmoves;
       send(`go movetime ${job.movetime}${roots ? " searchmoves " + roots.join(" ") : ""}`);
@@ -225,7 +233,9 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       engine.addMessageListener(listener);
       await exchange("uci", "uciok");
       if (gen !== generation || disposed) return;
-      send("setoption name UCI_Variant value janggicasual");
+      engine.FS.writeFile(KAKAO.path, KAKAO.ini);
+      send(`setoption name VariantPath value ${KAKAO.path}`);
+      send(`setoption name UCI_Variant value ${KAKAO.name}`);
       send(`setoption name Threads value ${threads}`);
       send(`setoption name Hash value ${hash}`);
       writeNetwork();
@@ -249,7 +259,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       // max 가 바뀐 국면(대국 중에 그 편을 최강 엔진으로 바꿈)도 새 국면으로 본다: 0.8초 분석 결과를 최강 수로 쓰지 않는다.
       if (id === gameId) while (common < entries.length && common < positions.length &&
         entries[common].fen === positions[common].fen && entries[common].turn === positions[common].turn &&
-        !!entries[common].max === !!positions[common].max &&
+        !!entries[common].max === !!positions[common].max && entries[common].position === positions[common].position &&
         String(entries[common].searchmoves ?? "") === String(positions[common].searchmoves ?? "")) common++;
       const changed = id !== gameId || common !== entries.length || common !== positions.length;
       if (changed) { cancelFocus(); stopDeepening(); } // 새 수가 붙어도 깊게 보기는 멈추고 새 국면부터 본다

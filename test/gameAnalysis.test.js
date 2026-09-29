@@ -41,11 +41,11 @@ describe("game analysis integration", () => {
     const base = { gameId: g.id, fen: integration.analysisPositions(g)[0].fen, ply: 0, cp: 0, win: 50, depth: 20, candidates: [] };
     const engine = (result) => integration.cacheEvaluation(integration.syncAnalysisCache(null, g), g, { ...base, ...result }).analysis.engine;
     expect(engine({ nnue: "on", mode: "continuous", threads: 7, movetime: 20000 })).toBe(
-      "fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=janggi-9991472750de mode=continuous movetime=800 deepen-movetime=20000 max-movetime=3000 threads=7");
+      "fairy-stockfish-nnue.wasm 1.1.12 janggikakao nnue=janggi-9991472750de mode=continuous movetime=800 deepen-movetime=20000 max-movetime=3000 threads=7");
     expect(engine({ nnue: "off", mode: "deep", threads: 4, movetime: 3000 })).toBe(
-      "fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=off mode=deep movetime=3000 max-movetime=3000 threads=4");
+      "fairy-stockfish-nnue.wasm 1.1.12 janggikakao nnue=off mode=deep movetime=3000 max-movetime=3000 threads=4");
     expect(engine({ nnue: "off", mode: "fast", threads: 1, movetime: 800 })).toBe(
-      "fairy-stockfish-nnue.wasm 1.1.12 janggicasual nnue=off mode=fast movetime=800 max-movetime=3000 threads=1");
+      "fairy-stockfish-nnue.wasm 1.1.12 janggikakao nnue=off mode=fast movetime=800 max-movetime=3000 threads=1");
   });
   it("validates a max move through game.play and explicitly rejects an illegal result", async () => {
     expect(integration.engineTurn).toBeTypeOf("function");
@@ -116,3 +116,44 @@ describe("engines obey the repetition rule (user request: Kakao Janggi)", () => 
     expect(integration.analysisPositions(g, { restrictions: true })[0].searchmoves).toBeUndefined();
   });
 });
+
+describe("engine position with move history (user report 2026-09-29: repetition inside the search)", () => {
+  const F0 = "rbna1abnr/4k4/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/4K4/RNBA1ANBR w - - 0 1";
+  const F3 = "rbna1abnr/4k4/1c5c1/2p1p1p1p/p8/P8/2P1P1P1P/1C5C1/4K4/RNBA1ANBR b - - 0 1";
+  const game = () => {
+    let g = { ...newGame({ controllers: { c: "human", h: "human" } }), id: "game-a" };
+    for (const m of [[54, 45], [27, 36], "pass", [29, 38]]) g = play(g, m); // a4a5, a7a6, 초 쉬기, c7c6
+    return g;
+  };
+  it("sends the history since the game start, and restarts it after a pass (a pass resets the repetition count)", () => {
+    const positions = integration.analysisPositions(game(), { restrictions: true }).map((p) => p.position);
+    expect(positions).toEqual([
+      `position fen ${F0}`,
+      `position fen ${F0} moves a4a5`,
+      `position fen ${F0} moves a4a5 a7a6`,
+      `position fen ${F3}`,
+      `position fen ${F3} moves c7c6`,
+    ]);
+  });
+  it("also restarts after an automatic pass (the same side moved twice)", () => {
+    const g = game();
+    const states = [...g.hist, g].slice(0, 3).map((s) => ({ ...s }));
+    states[1].turn = states[0].turn; // 초가 두고 한이 둘 수가 없어 자동으로 쉬었다고 치면 다음 수도 초
+    states[2].turn = "h";           // 그 초의 수 뒤에는 한 차례
+    expect(integration.enginePositions(states, g.moves.slice(0, 2))).toEqual([
+      `position fen ${F0}`,
+      "position fen rbna1abnr/4k4/1c5c1/p1p1p1p1p/9/P8/2P1P1P1P/1C5C1/4K4/RNBA1ANBR w - - 0 1",
+      "position fen rbna1abnr/4k4/1c5c1/p1p1p1p1p/9/P8/2P1P1P1P/1C5C1/4K4/RNBA1ANBR w - - 0 1 moves a7a6",
+    ]);
+  });
+  it("is computed only for the engine sync, not on every render", () => {
+    expect(integration.analysisPositions(game()).some((p) => "position" in p)).toBe(false);
+  });
+  it("records the Kakao repetition variant in the engine string", () => {
+    const g = game();
+    const r = { gameId: g.id, fen: integration.analysisPositions(g)[0].fen, ply: 0, cp: 0, win: 50, depth: 12, nnue: "off", mode: "fast", threads: 1, movetime: 800, candidates: [] };
+    expect(integration.cacheEvaluation(integration.syncAnalysisCache(null, g), g, r).analysis.engine).toBe(
+      "fairy-stockfish-nnue.wasm 1.1.12 janggikakao nnue=off mode=fast movetime=800 max-movetime=3000 threads=1");
+  });
+});
+

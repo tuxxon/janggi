@@ -198,7 +198,7 @@ describe("engine recovery and NNUE", () => {
     const bytes = new Uint8Array([7, 8]);
     const applied = service.setNetwork(bytes, "uploaded.nnue");
     loaded(null); await service.ready; await applied;
-    expect(engine.FS.writeFile).toHaveBeenCalledWith("/uploaded.nnue", bytes);
+    expect(engine.FS.writeFile).toHaveBeenCalledWith("/janggikakao-uploaded.nnue", bytes);
     expect(engine.commands).toContain("setoption name Use NNUE value true");
   });
   it("retries a load failure once and then disables with the reason", async () => {
@@ -256,15 +256,15 @@ describe("engine recovery and NNUE", () => {
     const applied = service.setNetwork(bytes, "test.nnue");
     expect(onReset).toHaveBeenCalledOnce();
     expect(engine.commands.at(-1)).toBe("stop");
-    expect(engine.FS.writeFile).not.toHaveBeenCalled();
+    expect(engine.FS.writeFile).not.toHaveBeenCalledWith("/janggikakao-test.nnue", bytes); // 변형 파일은 시작 때 썼다
     engine.finish(999); await applied; await tick();
     expect(results).toEqual([]);
-    expect(engine.FS.writeFile).toHaveBeenCalledWith("/test.nnue", bytes);
-    expect(engine.commands).toContain("setoption name EvalFile value /test.nnue");
+    expect(engine.FS.writeFile).toHaveBeenCalledWith("/janggikakao-test.nnue", bytes);
+    expect(engine.commands).toContain("setoption name EvalFile value /janggikakao-test.nnue");
     expect(engine.commands).toContain("setoption name Use NNUE value true");
     expect(engine.commands.filter((c) => c === "isready")).toHaveLength(2);
     expect(service.status.nnue).toBe("off");
-    engine.emit("info string NNUE evaluation using /test.nnue enabled");
+    engine.emit("info string NNUE evaluation using /janggikakao-test.nnue enabled");
     engine.finish(); await tick();
     expect(results[0]).toMatchObject({ nnue: "on", ply: 0 });
     await service.setNetwork(null); await tick();
@@ -666,6 +666,42 @@ describe("review B test gaps (2026-09-29)", () => {
     engine.emit(line(20, 190, "a7a6"));
     expect(results.at(-1)).toMatchObject({ depth: 20, cp: -190 });
     expect(results.at(-1).win).toBeCloseTo(33.22, 1);
+  });
+});
+
+describe("Kakao repetition inside the engine search (user report 2026-09-29)", () => {
+  it("registers janggicasual + moveRepetitionIllegal as its own variant and plays it", async () => {
+    const { service, engine } = setup();
+    service.sync("g", [position(0)]); await service.ready;
+    expect(engine.FS.writeFile).toHaveBeenCalledWith("/janggi-kakao.ini",
+      "[janggikakao:janggicasual]\nmoveRepetitionIllegal = true\nnFoldRule = 4\n");
+    const path = engine.commands.indexOf("setoption name VariantPath value /janggi-kakao.ini");
+    const variant = engine.commands.indexOf("setoption name UCI_Variant value janggikakao");
+    expect(path).toBeGreaterThan(-1);
+    expect(variant).toBeGreaterThan(path);
+    expect(engine.commands).not.toContain("setoption name UCI_Variant value janggicasual");
+  });
+  it("sends the position with its move history when the position carries one", async () => {
+    const { service, engine } = setup();
+    service.sync("g", [position(0, "c", { position: "position fen start-fen moves a1a2 a10a9" })]); await service.ready;
+    expect(engine.positions).toEqual(["position fen start-fen moves a1a2 a10a9"]);
+  });
+  it("treats the same FEN reached through a different history as a new position", async () => {
+    const { service, engine } = setup();
+    service.sync("g", [position(0, "c", { position: "position fen s moves a1a2" })]); await service.ready;
+    engine.finish(); await tick();
+    service.sync("g", [position(0, "c", { position: "position fen s moves b1c3" })]); await tick();
+    expect(engine.positions).toEqual(["position fen s moves a1a2", "position fen s moves b1c3"]);
+  });
+});
+
+describe("the network with the Kakao variant (found by the NNUE e2e test)", () => {
+  it("writes the network under a name starting with the variant name — ini variants lose the 'janggi' NNUE alias", async () => {
+    const bytes = new Uint8Array([9]);
+    const { service, engine } = setup({ loadNetwork: async () => bytes });
+    service.sync("g", [position(0)]); await service.ready;
+    expect(engine.FS.writeFile).toHaveBeenCalledWith("/janggikakao-janggi-9991472750de.nnue", bytes);
+    expect(engine.commands).toContain("setoption name EvalFile value /janggikakao-janggi-9991472750de.nnue");
   });
 });
 
