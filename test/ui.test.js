@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import Janggi, { WinBar, Candidates, MaxClock } from "../src/Janggi.jsx";
+import Janggi, { WinBar, Candidates, MaxClock, LookNote } from "../src/Janggi.jsx";
 import { ReviewPanel, GameList } from "../src/Review.jsx";
 import { newGame } from "../src/game.js";
 
@@ -133,6 +133,23 @@ describe("max think time (user request 2026-09-30)", () => {
       onOpen() {}, onExport() {}, onExportAll() {}, onImport() {}, error: null })).replaceAll("<!-- -->", "");
     expect(html).toContain("한 엔진 · 최강 · 3초 · 3수");
     expect(html).toContain("한 엔진 · 최강 · 20초 · 3수");
+  });
+});
+
+// 오른쪽 클릭 30초 깊게 보기(사용자 요청 2026-09-30): 후보 수 아래 안내 줄.
+describe("move deep look note (user request 2026-09-30)", () => {
+  const note = (props) => renderToStaticMarkup(createElement(LookNote, { board: newGame().b, move: "a4a5", ...props })).replaceAll("<!-- -->", "");
+  it("names the move, its win, depth and the seconds read so far", () => {
+    vi.useFakeTimers(); vi.setSystemTime(100_000);
+    try {
+      expect(note({ result: null, since: 100_000, spent: 0 })).toContain("깊게 보는 수: 졸 a4→a5 · 읽는 중 (0/30초)");
+      expect(note({ result: { move: "a4a5", win: 57.4, depth: 24, done: false }, since: 95_000, spent: 7000 }))
+        .toContain("깊게 보는 수: 졸 a4→a5 · 57% · 깊이 24 (12/30초)");
+      expect(note({ result: { move: "a4a5", win: 57.4, depth: 24, done: false }, since: null, spent: 4000 }))
+        .toContain("(4/30초)");                                                // 미리 보기에 끊긴 동안은 멈춘다
+      expect(note({ result: { move: "a4a5", win: 57.4, depth: 29, done: true }, since: null, spent: null }))
+        .toContain("깊게 본 수: 졸 a4→a5 · 57% · 깊이 29 (30초)");
+    } finally { vi.useRealTimers(); }
   });
 });
 

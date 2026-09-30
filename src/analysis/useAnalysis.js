@@ -52,6 +52,7 @@ export function useAnalysis(game, { mode = "fast", deepen = null, deepCap = null
   // Render immediately against the new game, even before the synchronization effect runs.
   const view = syncAnalysisCache(cache.id === game.id ? cache : cachesRef.current.get(game.id) ?? null, game);
   const ply = game.moves.length;
-  return { serviceRef, status, haltDeepen: () => serviceRef.current?.haltDeepen(), moveNow: (since) => serviceRef.current?.moveNow(since), cacheId: view.id, cache: view.analysis,
+  return { serviceRef, status, haltDeepen: () => serviceRef.current?.haltDeepen(), moveNow: (since) => serviceRef.current?.moveNow(since),
+    look: (ply, move, onUpdate) => serviceRef.current?.look(ply, move, onUpdate), cancelLook: () => serviceRef.current?.cancelLook(), cacheId: view.id, cache: view.analysis,
     results: view.results, evals: view.analysis?.evals, current: view.results[ply], evaluation: view.analysis?.evals[ply] };
 }

@@ -14,6 +14,7 @@ import { moveDelta, grade, moverWin } from "./winrate.js";
 import { useAnalysis } from "./analysis/useAnalysis.js";
 import { engineTurn, maxTimeOf } from "./analysis/gameAnalysis.js";
 import { HintLabels } from "./analysis/HintLabels.jsx";
+import { MOVETIME } from "./analysis/service.js";
 
 // ===== React 화면 =====
 
@@ -97,6 +98,23 @@ export function WinBar({ a, status, fen, stable = null }) {
 }
 
 // 후보 목록. depth: 저장된 판 복기에서는 후보마다 깊이를 적는다 — 2단계 1순위와 1단계 후보는 깊이가 다른 점수다(개정 2.10).
+// 오른쪽 클릭 30초 깊게 보기의 안내 줄(사용자 요청 2026-09-30). since·spent: 서비스의 lookSince·lookSpent —
+// spent 가 있으면 읽는 중(since 가 없으면 미리 보기에 끊겨 멈춘 동안), 없으면 다 읽었다.
+export function LookNote({ board, move, result, since, spent }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (since == null) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [since]);
+  const reading = spent != null, total = MOVETIME.look / 1000;
+  const secs = Math.min(total, Math.floor(((spent ?? 0) + (since != null ? Date.now() - since : 0)) / 1000));
+  const value = result ? `${Math.round(result.win)}% · 깊이 ${result.depth}` : "읽는 중";
+  return <div data-testid="look-note" style={{ fontSize: 12, color: "#3a2c20", marginTop: 4 }}>
+    {`${reading ? "깊게 보는 수" : "깊게 본 수"}: ${describeMove(board, move)} · ${value} (${reading ? `${secs}/${total}초` : `${total}초`})`}
+  </div>;
+}
+
 export function Candidates({ candidates, board, depth }) {
   return (
     <ol data-testid="candidates" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(125px, 1fr))", gap: 4, listStyle: "none", padding: 0, margin: "4px 0" }}>
@@ -125,6 +143,10 @@ export default function Janggi() {
   const [sel, setSel] = useState(null);
   const [hints, setHints] = useState(false);
   const [focused, setFocused] = useState(null);
+  // 마우스 미리 보기(후보 수 보기에서만): 올린 내 기물. 오른쪽 클릭 30초 깊게 보기: 그 국면(key)에서 고른 수와 수마다 결과
+  // (사용자 요청 2026-09-30).
+  const [preview, setPreview] = useState(null);
+  const [looks, setLooks] = useState({ key: null, current: null, byMove: {} });
   const [moveError, setMoveError] = useState(null);
   const [networkError, setNetworkError] = useState(null);
   const [networkBusy, setNetworkBusy] = useState(false);
@@ -182,6 +204,10 @@ export default function Janggi() {
   useEffect(() => { setNotice(null); }, [g, sel]);
   const canSelect = myTurn || (reviewing && hints); // 복기에서는 훈수 모드일 때 기물을 집어 승률만 본다
   const targets = sel !== null && canSelect ? legalMoves(posState).filter((m) => m[0] === sel) : [];
+  // 보여줄 기물: 집은 기물, 없으면 마우스를 올린 기물. 두기(왼쪽 클릭)는 집은 기물의 targets 로만 한다.
+  const shown = sel ?? (hints && canSelect ? preview : null);
+  const shownTargets = sel !== null ? targets : shown !== null ? legalMoves(posState).filter((m) => m[0] === shown) : [];
+  useEffect(() => { setPreview(null); }, [posState]);
   const checkKing = !view.over && inCheck(view.b, view.turn) ? kingIdx(view.b, view.turn) : -1;
   // 분석 캐시는 그 캐시의 판에만 저장한다. 복기 판은 목록 순서(가장 최근 판)를 바꾸지 않는다.
   useEffect(() => {
@@ -195,13 +221,17 @@ export default function Janggi() {
   useEffect(() => {
     setFocused(null);
     const service = serviceRef.current;
-    if (!hints || sel === null || !canSelect || !fReady || !targets.length) return;
+    if (!hints || shown === null || !canSelect || !fReady || !shownTargets.length) return;
     let alive = true;
-    service.focus(fPly, targets.map(moveToUci)).then((candidates) => {
-      if (alive && candidates) setFocused({ game: fGame, ply: fPly, sel, candidates });
+    service.focus(fPly, shownTargets.map(moveToUci)).then((candidates) => {
+      if (alive && candidates) setFocused({ game: fGame, ply: fPly, sel: shown, candidates });
     });
     return () => { alive = false; service.cancelFocus(); };
-  }, [fGame, fPly, sel, hints, canSelect, fReady, serviceRef]);
+  }, [fGame, fPly, shown, hints, canSelect, fReady, serviceRef]);
+  // 30초 깊게 보기는 그 국면에서만: 수를 두거나 복기에서 다른 수째로 가면 멈춘다(결과는 key 로 남는다).
+  const lookKey = `${fGame.id}:${fPly}:${toFen(view.b, view.turn)}`;
+  const deep = looks.key === lookKey ? looks.byMove : {};
+  useEffect(() => { serviceRef.current?.cancelLook(); }, [lookKey, serviceRef]);
 
   async function updateNetwork(file) {
     setNetworkBusy(true); setNetworkError(null);
@@ -231,7 +261,7 @@ export default function Janggi() {
   function play(m, slide) { setSel(null); setDrag(null); setG({ ...applyMove(g, m), slide }); }
 
   function onDown(e) {
-    if (!canSelect) return;
+    if (e.button !== 0 || !canSelect) return; // 오른쪽 클릭은 onContext(두지 않는다)
     const { x, y } = toSvg(e), i = idxAt(x, y);
     if (i === null) return;
     if (blocked && sel === blocked[0] && i === blocked[1]) { setNotice(REPETITION_NOTICE); return; }
@@ -244,8 +274,32 @@ export default function Janggi() {
       setSel(i);
     } else setSel(null);
   }
+  // 마우스 미리 보기: 내 기물 위에 잠깐(0.15초) 머물면 그 기물을 보여준다. 빈 칸·도착 칸으로 옮겨도 남고, 판을 벗어나면 지운다.
+  const hoverTimer = useRef(null);
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  function hover(e) {
+    if (e.pointerType !== "mouse" || !hints || !canSelect) return;
+    const { x, y } = toSvg(e), i = idxAt(x, y), p = i === null ? null : view.b[i];
+    clearTimeout(hoverTimer.current);
+    if (p && p[0] === view.turn && i !== preview) hoverTimer.current = setTimeout(() => setPreview(i), 150);
+  }
+  function leave() { clearTimeout(hoverTimer.current); setPreview(null); }
+  // 오른쪽 클릭: 보여준 기물의 도착 칸이면 그 수만 30초 깊게 읽는다(두지 않는다). 후보 수 보기일 때만 브라우저 메뉴를 막는다.
+  function onContext(e) {
+    if (!hints) return;
+    e.preventDefault();
+    if (!canSelect) return;
+    const { x, y } = toSvg(e), i = idxAt(x, y), t = i === null ? null : shownTargets.find((m) => m[1] === i);
+    if (!t) return;
+    const move = moveToUci(t), key = lookKey;
+    setLooks((prev) => {
+      const { [move]: _, ...rest } = prev.key === key ? prev.byMove : {}; // 같은 수를 다시 고르면 새로 읽는다
+      return { key, current: move, byMove: rest };
+    });
+    analysis.look(fPly, move, (u) => setLooks((prev) => (prev.key === key ? { ...prev, byMove: { ...prev.byMove, [u.move]: u } } : prev)));
+  }
   function onMove(e) {
-    if (!drag) return;
+    if (!drag) { hover(e); return; }
     const { x, y } = toSvg(e);
     const [ox, oy] = xy(drag.i);
     setDrag({ ...drag, x, y, moved: drag.moved || Math.hypot(x - ox, y - oy) > 10 });
@@ -376,7 +430,7 @@ export default function Janggi() {
   const viewResult = review ? analysis.results?.[review.k] : null;
   const stable = savedReview && viewResult?.deepCap !== undefined ? viewResult.stable : null; // 2단계 결과의 "같은 수 N깊이째"
   const candidates = hints ? (review ? analysis.results?.[review.k]?.candidates : analysis.current?.candidates) ?? [] : [];
-  const focusCandidates = hints && focused?.game === fGame && focused.ply === fPly && focused.sel === sel ? focused.candidates : [];
+  const focusCandidates = hints && focused?.game === fGame && focused.ply === fPly && focused.sel === shown ? focused.candidates : [];
   const turnWin = moverWin(viewEval, view.turn);
 
   const Tray = ({ side }) => (
@@ -411,16 +465,22 @@ export default function Janggi() {
         {corrupted && <div role="status" style={{ fontSize: 13, color: COL.h, marginTop: 6 }}>최근 기보 손상됨 — 새 게임을 시작했어요.</div>}
         <WinBar a={viewEval} status={analysis.status} fen={toFen(view.b, view.turn)} stable={stable} />
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
-          <input type="checkbox" checked={hints} onChange={(e) => { setHints(e.target.checked); if (!e.target.checked && review) setSel(null); }} />후보 수 보기
+          <input type="checkbox" checked={hints} onChange={(e) => {
+            setHints(e.target.checked);
+            if (!e.target.checked) { analysis.cancelLook(); setPreview(null); setLooks({ key: null, current: null, byMove: {} }); }
+            if (!e.target.checked && review) setSel(null);
+          }} />후보 수 보기
         </label>
         {hints && <div style={{ fontSize: 12, color: "#65584a", marginTop: 4 }}>
           {view.turn === "c" ? "초" : "한"}가 둘 수 · 두는 쪽 승률
           <Candidates candidates={candidates} board={view.b} depth={savedReview} />
+          {looks.key === lookKey && looks.current && <LookNote board={view.b} move={looks.current} result={looks.byMove[looks.current]}
+            since={analysis.status.lookSince} spent={analysis.status.lookSpent} />}
           {!candidates.length && <span>상위 5수는 이 국면을 분석한 뒤에 보여요. 기물을 집으면 그 기물의 수마다 승률이 떠요.</span>}
         </div>}
         <Tray side={flip ? "c" : "h"} />
         <div style={{ borderRadius: 10, overflow: "hidden", boxShadow: "0 10px 30px rgba(40,20,5,.35)" }}>
-          <svg ref={svgRef} data-fen={toFen(view.b, view.turn)} viewBox={`${-GUT} 0 ${W + GUT} ${H + GUT}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)} style={{ display: "block", width: "100%", height: "auto", userSelect: "none", touchAction: "none", cursor: canSelect ? "pointer" : "default" }}>
+          <svg ref={svgRef} data-fen={toFen(view.b, view.turn)} viewBox={`${-GUT} 0 ${W + GUT} ${H + GUT}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)} onPointerLeave={leave} onContextMenu={onContext} style={{ display: "block", width: "100%", height: "auto", userSelect: "none", touchAction: "none", cursor: canSelect ? "pointer" : "default" }}>
             <defs>
               <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
                 <stop offset="0" stopColor="#d6ab66" />
@@ -469,7 +529,7 @@ export default function Janggi() {
                 </g>
               );
             })}
-            {targets.map((m) => {
+            {shownTargets.map((m) => {
               const [x, y] = xy(m[1]);
               return view.b[m[1]] ? (
                 <circle key={"t" + m[1]} cx={x} cy={y} r="31" fill="none" stroke={MARK} strokeWidth="4" />
@@ -492,7 +552,7 @@ export default function Janggi() {
                 <Piece p={view.b[drag.i]} x={drag.x} y={drag.y} selected lifted />
               </g>
             )}
-            {hints && <HintLabels candidates={candidates} focused={focusCandidates} targets={targets} turnWin={turnWin} board={view.b}
+            {hints && <HintLabels candidates={candidates} focused={focusCandidates} targets={shownTargets} deep={deep} turnWin={turnWin} board={view.b}
               passSquare={kingIdx(view.b, view.turn)} hovered={drag?.moved ? idxAt(drag.x, drag.y) : null} xy={xy} />}
           </svg>
         </div>

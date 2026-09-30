@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openIsolated, clickBoard, logUci, uci } from "./helpers.js";
+import { openIsolated, clickBoard, hoverBoard, logUci, uci } from "./helpers.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { NNUE } from "../src/analysis/fsf.js";
@@ -264,6 +264,51 @@ test("엔진이 먼저 두는 새 최강 · 20초 판은 첫 탐색부터 20초�
   await page.getByRole("button", { name: "새 게임" }).click();
   await expect.poll(async () => (await uci(page)).slice(mark).find((l) => l.startsWith("> go ")) ?? "", { timeout: 30_000 })
     .toBe("> go movetime 20000");
+});
+
+// 마우스 미리 보기와 오른쪽 클릭 30초 깊게 보기(사용자 요청 2026-09-30).
+test("후보 수 보기를 켜면 기물에 마우스만 올려도 도착 칸 승률이 뜨고, 오른쪽 클릭한 칸은 그 수만 30초 깊게 읽는다 (사용자 요청)", async ({ page }) => {
+  await logUci(page);
+  await openGame(page);
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");      // 엔진 응수가 끼지 않게
+  await page.getByLabel("후보 수 보기").check();
+  await expect(page.getByTestId("candidates").locator("li")).toHaveCount(5, { timeout: 30_000 }); // 국면 분석이 끝났다
+  await hoverBoard(page, 6, 0);                                                     // 초 a4 졸: 누르지 않고 올리기만
+  await expect(page.getByTestId("target-win")).toHaveCount(2, { timeout: 10_000 });
+  await hoverBoard(page, 5, 0);                                                     // 도착 칸으로 옮겨도 남는다
+  await expect(page.getByTestId("target-win")).toHaveCount(2);
+  await page.evaluate(() => window.addEventListener("contextmenu", (e) => { window.__menu = !e.defaultPrevented; }));
+  let mark = (await uci(page)).length;
+  await clickBoard(page, 5, 0, { button: "right" });
+  expect(await page.evaluate(() => window.__menu)).toBe(false);                     // 브라우저 메뉴를 막았다
+  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 30000 searchmoves a4a5"), { timeout: 10_000 }).toBe(true);
+  const note = page.getByTestId("look-note");
+  await expect(note).toContainText(/깊게 보는 수: 졸 a4→a5 · \d+% · 깊이 \d+ \(\d+\/30초\)/, { timeout: 10_000 });
+  const secs = async () => Number(/\((\d+)\/30초\)/.exec(await note.textContent())?.[1] ?? NaN);
+  const s0 = await secs();
+  await expect.poll(secs, { timeout: 5_000 }).toBeGreaterThan(s0);                 // 화면에서 실제로 올라간다
+  await expect(page.locator('[data-testid="target-win"][data-move="a4a5"][data-deep="true"]')).toContainText(/깊이 \d+…/);
+  expect((await latestRecord(page)).moves).toEqual([]);                            // 오른쪽 클릭은 두지 않는다
+  // 다른 기물에 올리면 미리 보기(0.5초)가 끼어들고, 30초 깊게 보기는 남은 시간으로 이어 읽는다.
+  mark = (await uci(page)).length;
+  await hoverBoard(page, 6, 2);                                                     // 초 c4 졸
+  await expect(page.locator('[data-testid="target-win"][data-move^="c4"]')).not.toHaveCount(0, { timeout: 10_000 });
+  await expect.poll(async () => (await uci(page)).slice(mark).map((l) => /^> go movetime (\d+) searchmoves a4a5$/.exec(l)?.[1]).find(Boolean) ?? "",
+    { timeout: 10_000 }).toMatch(/^\d+$/);
+  const resumed = Number((await uci(page)).slice(mark).map((l) => /^> go movetime (\d+) searchmoves a4a5$/.exec(l)?.[1]).find(Boolean));
+  expect(resumed).toBeLessThan(30000);
+  await page.mouse.move(1, 1);                                                      // 판 밖으로 나가면 미리 보기가 사라진다
+  await expect(page.getByTestId("target-win")).toHaveCount(0);
+  // 왼쪽 클릭으로 집은 기물도 오른쪽 클릭은 두지 않고 깊게 읽는다. 두기는 왼쪽 클릭 그대로.
+  await clickSq(page, 6, 2);                                                        // 초 c4 졸을 집는다
+  mark = (await uci(page)).length;
+  await clickBoard(page, 5, 2, { button: "right" });
+  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 30000 searchmoves c4c5"), { timeout: 10_000 }).toBe(true);
+  await expect(note).toContainText("졸 c4→c5");
+  expect((await latestRecord(page)).moves).toEqual([]);
+  await clickSq(page, 5, 2);
+  await expect.poll(async () => (await latestRecord(page))?.moves).toEqual(["c4c5"]);
+  await expect(note).toHaveCount(0);                                                // 수를 두면 사라진다
 });
 
 test("후보 수 보기는 선택한 기물의 도착 칸에 승률을 붙이고 선택 해제 시 지운다", async ({ page }) => {

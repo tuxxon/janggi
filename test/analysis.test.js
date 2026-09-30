@@ -1466,3 +1466,114 @@ describe("max think time and move now (user request 2026-09-30)", () => {
     expect(service.status).toMatchObject({ maxSince: null, maxMovetime: null });
   });
 });
+
+// 오른쪽 클릭 30초 깊게 보기(사용자 요청 2026-09-30): 한 수만(searchmoves) MultiPV 1 로 30초. 우선순위 최강 > 밀린 국면 > 초점 >
+// 이것 > 깊게 보기. 초점(마우스 미리 보기)에 끊기면 남은 시간으로 이어 읽고, 판이 바뀌면 버린다.
+describe("move deep look (user request 2026-09-30)", () => {
+  const exact = (depth, cp, move = "b1c3") => `info depth ${depth} multipv 1 score cp ${cp} nodes 100 pv ${move}`;
+  it("reads only that move for 30 s with MultiPV 1, ahead of the deep look, and reports each deeper exact line", async () => {
+    const { service, engine } = setup({ mode: "continuous" });
+    service.sync("g", [position(0)]); await service.ready;
+    engine.finish(); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
+    const updates = [];
+    service.look(0, "b1c3", (u) => updates.push(u));
+    expect(engine.commands.at(-1)).toBe("stop");                               // 깊게 보기를 비킨다
+    engine.emit("bestmove a4a5"); await tick();
+    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 1", "position fen fen-0", "go movetime 30000 searchmoves b1c3"]);
+    engine.emit(exact(10, 20)); engine.emit(exact(10, 21));
+    engine.emit("info depth 11 multipv 1 score cp 30 lowerbound nodes 100 pv b1c3");   // bound 줄은 평가가 아니다
+    engine.emit(exact(11, 25));
+    expect(updates.map((u) => [u.move, u.depth, u.cp, u.done])).toEqual([["b1c3", 10, 20, false], ["b1c3", 11, 25, false]]);
+    expect(updates[1].win).toBeCloseTo(52.3, 0);                                 // 두는 쪽 승률(후보와 같은 모양)
+    engine.emit("bestmove b1c3"); await tick();
+    expect(updates.at(-1)).toMatchObject({ move: "b1c3", depth: 11, cp: 25, done: true });
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");                  // 다 읽으면 깊게 보기로 돌아간다
+  });
+  it("waits for the running quick pass of a new position instead of stopping it", async () => {
+    const { service, engine } = setup({ mode: "continuous" });
+    service.sync("g", [position(0)]); await service.ready;
+    expect(engine.searches).toEqual(["go movetime 800"]);
+    service.look(0, "b1c3", () => {});
+    expect(engine.commands).not.toContain("stop");
+    engine.finish(); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 30000 searchmoves b1c3");
+  });
+  it("a hover focus preempts it, then it resumes with the time left and reports only deeper lines", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const { service, engine } = setup();
+    service.sync("g", [position(0)]);
+    await vi.advanceTimersByTimeAsync(0); await service.ready;
+    engine.finish(); await vi.advanceTimersByTimeAsync(0);
+    const updates = [];
+    service.look(0, "b1c3", (u) => updates.push(u)); await vi.advanceTimersByTimeAsync(0);
+    expect(engine.searches.at(-1)).toBe("go movetime 30000 searchmoves b1c3");
+    engine.emit(exact(15, 20));
+    vi.setSystemTime(11_000);
+    const focused = service.focus(0, ["a4a5"]);
+    expect(engine.commands.at(-1)).toBe("stop");
+    engine.emit("bestmove b1c3"); await vi.advanceTimersByTimeAsync(0);
+    expect(updates.at(-1).done).toBe(false);                                     // 끊긴 것은 다 읽은 것이 아니다
+    expect(engine.searches.at(-1)).toBe("go movetime 500 searchmoves a4a5");
+    engine.finish(3, "a4a5"); await vi.advanceTimersByTimeAsync(0);
+    await expect(focused).resolves.toHaveLength(1);
+    expect(engine.searches.at(-1)).toBe("go movetime 20000 searchmoves b1c3"); // 남은 20초
+    engine.emit(exact(9, 5)); engine.emit(exact(15, 21));
+    expect(updates.map((u) => u.depth)).toEqual([15]);                          // 다시 시작한 얕은 줄은 보내지 않는다
+    engine.emit(exact(16, 22));
+    expect(updates.map((u) => u.depth)).toEqual([15, 16]);
+  });
+  it("status.lookSince/lookSpent: running, preempted, done", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const { service, engine } = setup();
+    service.sync("g", [position(0)]);
+    await vi.advanceTimersByTimeAsync(0); await service.ready;
+    engine.finish(); await vi.advanceTimersByTimeAsync(0);
+    expect(service.status).toMatchObject({ lookSince: null, lookSpent: null });
+    vi.setSystemTime(2000);
+    service.look(0, "b1c3", () => {}); await vi.advanceTimersByTimeAsync(0);
+    expect(service.status).toMatchObject({ lookSince: 2000, lookSpent: 0 });
+    vi.setSystemTime(6000);
+    void service.focus(0, ["a4a5"]);
+    engine.emit("bestmove b1c3"); await vi.advanceTimersByTimeAsync(0);
+    expect(service.status).toMatchObject({ lookSince: null, lookSpent: 4000 });  // 초점이 도는 동안
+    vi.setSystemTime(7000);
+    engine.finish(3, "a4a5"); await vi.advanceTimersByTimeAsync(0);
+    expect(service.status).toMatchObject({ lookSince: 7000, lookSpent: 4000 });
+    engine.emit(exact(12, 5)); engine.emit("bestmove b1c3"); await vi.advanceTimersByTimeAsync(0);
+    expect(service.status).toMatchObject({ lookSince: null, lookSpent: null });
+  });
+  it("a new move drops it; another look replaces it; cancelLook stops it", async () => {
+    const { service, engine } = setup();
+    service.sync("g", [position(0)]); await service.ready;
+    engine.finish(); await tick();
+    const first = [];
+    service.look(0, "b1c3", (u) => first.push(u)); await tick();
+    service.look(0, "g1f3", () => {});                                           // 바꾼다
+    expect(engine.commands.at(-1)).toBe("stop");
+    engine.emit(exact(12, 5)); engine.emit("bestmove b1c3"); await tick();
+    expect(first).toEqual([]);                                                   // 버린 탐색의 줄은 보내지 않는다
+    expect(engine.searches.at(-1)).toBe("go movetime 30000 searchmoves g1f3");
+    service.cancelLook();
+    expect(engine.commands.at(-1)).toBe("stop");
+    engine.emit("bestmove g1f3"); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 30000 searchmoves g1f3");  // 다시 시작하지 않았다
+    const count = engine.searches.length;
+    service.look(0, "b1c3", () => {}); await tick();
+    expect(engine.searches).toHaveLength(count + 1);
+    service.sync("g", [position(0), position(1)]);                               // 수를 뒀다
+    expect(engine.commands.at(-1)).toBe("stop");
+    engine.emit("bestmove b1c3"); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 800");                     // 새 국면, look 은 사라졌다
+    engine.finish(); await tick();
+    expect(engine.searches.filter((s) => s.includes("searchmoves b1c3"))).toHaveLength(2);
+  });
+  it("does nothing for an unknown ply", async () => {
+    const { service, engine } = setup();
+    service.sync("g", [position(0)]); await service.ready;
+    engine.finish(); await tick();
+    const count = engine.commands.length;
+    service.look(5, "b1c3", () => {});
+    expect(engine.commands).toHaveLength(count);
+  });
+});

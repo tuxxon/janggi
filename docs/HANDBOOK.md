@@ -1,7 +1,7 @@
 # 장기(janggi) 핸드북
 
 다음 세션이 이 문서 하나로 이어서 일할 수 있게 쓴 안내서다. 결정의 근거와 세부 규칙의 정본은 설계 문서다:
-[`docs/superpowers/specs/2026-09-28-janggi-mcp-design.md`](superpowers/specs/2026-09-28-janggi-mcp-design.md) (개정 2.12).
+[`docs/superpowers/specs/2026-09-28-janggi-mcp-design.md`](superpowers/specs/2026-09-28-janggi-mcp-design.md) (개정 2.13).
 
 - 저장소: `~/workspace/janggi` · GitHub [tuxxon/janggi](https://github.com/tuxxon/janggi) (public)
 - 기준: 2026-09-30, `main` (이 문서를 고친 커밋)
@@ -18,13 +18,13 @@
 |---|---|
 | 대국 | 위·아래 자리마다 나라(초/한)·두는 이(사람/엔진)·상차림. 판 방향은 아래쪽 나라를 따르고, 선수는 항상 초 |
 | 엔진 | 쉬움·보통·어려움 = 원본 엔진. **최강 · 3초 / 최강 · 20초** = Fairy-Stockfish(WASM)가 그 시간 읽고 항상 최선수(20초는 사용자 요청 2026-09-30). 최강끼리는 대국 중에도 바로 바뀌고(다음 최강 탐색부터), 생각하는 동안 상태 줄에 경과 초와 **지금 두기**(`stop` → 그때까지의 최선수) |
-| 승률 | 대국 중 막대, 직전 수 변화와 실수 등급(?! ? ??), 훈수 모드(상위 5수 + 집은 기물의 수마다 승률) |
+| 승률 | 대국 중 막대, 직전 수 변화와 실수 등급(?! ? ??), 훈수 모드(상위 5수 + 집은 기물의 수마다 승률). 훈수 모드에서 마우스를 기물에 올리기만 해도 수마다 승률, 도착 칸 오른쪽 클릭 = 그 수만 30초 깊게(2026-09-30 사용자 요청, spec 2.13) |
 | 기보 | 수마다 localStorage에 저장. 새로고침해도 이어진다. 복기(버튼·←→·수순·그래프, 빈 평가 자동 분석), JSON 내보내기·가져오기 |
 | 반복수 | 카카오식: 궁·사가 아닌 기물로 두 칸을 계속 오갈 수 없다(같은 수 세 번째 금지). 쉬기·잡기·장군이 끼면 다시 센다 |
 | 표시 | 판에 좌표(아래 a–i, 왼쪽 1–10). 후보 수·복기 수순·직전 수 줄에 한글 기물 이름("마 g1→f3") |
 | 분석 모드 | 설정의 "분석": 빠르게 0.8초 / 깊게 3초 / **계속**(기본, 보고 있는 국면을 최대 1분 계속 깊게 — 처음엔 20초, 사용자 요청 2026-09-30). 즉시 적용, `janggi.prefs`에 기억. 엔진 스레드 = 코어의 절반(1~8), Hash 64MB(저장된 판 복기의 깊게 보기가 1분 이상일 때만 256MB), 최강 3초·20초. 깊게 보기 중엔 막대에 읽은 초. 저장된 판의 복기는 "깊게 보기"(MultiPV 1 · 20초/1분/5분/무제한, 5절) |
 | 반복수와 엔진 | 엔진도 카카오식 반복수를 안다: ini 변형 `janggikakao`(janggicasual + moveRepetitionIllegal) + 마지막 쉬기 이후 수순을 보냄. 예전엔 반복을 무승부로 읽어 지는 수를 권했다(사용자 보고) |
-| 테스트 | 단위 296개 · Playwright 54개(Chromium + WebKit 스모크) — 전부 초록(2026-09-30, 최강 · 20초와 그 리뷰 수정 뒤) |
+| 테스트 | 단위 304개 · Playwright 56개(Chromium + WebKit 스모크) — 전부 초록(2026-09-30, 마우스 미리 보기·30초 깊게 보기 뒤) |
 
 ## 2. 실행과 테스트
 
@@ -64,9 +64,10 @@ src/analysis/service.js      UCI 서비스(주입된 엔진): 국면 대기열(�
                              분석 모드(setMode)와 깊게 보기(deepen(ply, cap), 선점·점진 결과). cap null = 진행 중인 판과 그 복기
                              (MultiPV 5 · 1분), cap 이 있으면 저장된 판 복기의 2단계(MultiPV 1 · 20초/1분/5분/무제한, 멈춤 haltDeepen,
                              무제한은 isready 탐침, 1분 이상 Hash 256). 판이 바뀌면 sync 가 첫 탐색 전에 상한을 푼다. 최강 생각 시간 setMaxTime(3000·20000,
-                             다음 최강 탐색부터), 지금 두기 moveNow(since)(stop 하되 결과를 버리지 않음), status.deepSince·maxSince·maxMovetime
+                             다음 최강 탐색부터), 지금 두기 moveNow(since)(stop 하되 결과를 버리지 않음), status.deepSince·maxSince·maxMovetime.
+                             30초 깊게 보기 look(ply, move, onUpdate)·cancelLook(초점에 끊기면 남은 시간으로 이어 읽음, status.lookSince·lookSpent)
 src/analysis/gameAnalysis.js 판 ↔ 서비스 연결(analysisPositions{restrictions}, cacheEvaluation 병합, engineTurn)
-src/analysis/useAnalysis.js  React 훅(판별 캐시, known 평가 전달, setMaxTime(sync 보다 먼저)·setMode·deepen(k, deepCap) 효과, haltDeepen, moveNow)
+src/analysis/useAnalysis.js  React 훅(판별 캐시, known 평가 전달, setMaxTime(sync 보다 먼저)·setMode·deepen(k, deepCap) 효과, haltDeepen, moveNow, look·cancelLook)
 src/analysis/fsf.js / nnue.js  WASM 로더(threadsFor, Hash 64), 사용자 신경망(크기+SHA-256 전체)
 vendor/coi-serviceworker.js  격리 서비스워커 수정본(MIT) — WebKit 304 처리
 scripts/vendor.mjs     public/ 으로 엔진 파일·SW·라이선스 고지 복사(dev/build 전에 자동)

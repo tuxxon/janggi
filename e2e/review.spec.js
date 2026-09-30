@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openIsolated, clickBoard, logUci, uci } from "./helpers.js";
+import { openIsolated, clickBoard, hoverBoard, logUci, uci } from "./helpers.js";
 import { readFileSync, readdirSync } from "node:fs";
 
 const OLD = "2026-09-27T10-00-00-000", LIVE = "2026-09-28T10-00-00-000";
@@ -395,6 +395,30 @@ test("엔진 차례로 끝난 저장된 최강 · 3초 판을 복기하면 진�
   await expect(status(page)).toContainText("복기 중 · 0/1수");
   await expect.poll(async () => (await uci(page)).filter((l) => /^> go movetime (3000|20000)$/.test(l)), { timeout: 30_000 })
     .toEqual(["> go movetime 3000"]);
+});
+
+// 마우스 미리 보기·오른쪽 클릭 30초 깊게 보기(사용자 요청 2026-09-30)는 복기 훈수에서도 되고, 다른 수째로 가면 멈춘다.
+test("복기 훈수에서도 마우스 미리 보기와 오른쪽 클릭 깊게 보기가 되고, 다른 수째로 넘기면 그 깊게 보기를 멈춘다 (사용자 요청)", async ({ page }) => {
+  await logUci(page);
+  await seed(page, [live, old]);
+  await openGame(page, 1);
+  await page.getByLabel("후보 수 보기").check();
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowLeft");
+  await expect(status(page)).toHaveText("복기 중 · 0/3수");
+  await hoverBoard(page, 6, 0);                                                     // 초 a4 졸
+  await expect(page.getByTestId("target-win")).toHaveCount(2, { timeout: 30_000 });
+  let mark = (await uci(page)).length;
+  await clickBoard(page, 5, 0, { button: "right" });
+  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 30000 searchmoves a4a5"), { timeout: 10_000 }).toBe(true);
+  await expect(page.getByTestId("look-note")).toContainText("졸 a4→a5");
+  mark = (await uci(page)).length;
+  await page.keyboard.press("ArrowRight");
+  await expect(status(page)).toHaveText("복기 중 · 1/3수");
+  await expect.poll(async () => (await uci(page)).slice(mark), { timeout: 10_000 }).toContain("> stop");
+  // 멈춘 탐색의 bestmove 를 받은 같은 틱에 서비스가 다음 탐색을 보낸다 — 그때 a4a5 를 다시 읽지 않았으면 이어 읽지 않는 것이다.
+  await expect.poll(async () => (await uci(page)).slice(mark).some((l) => l.startsWith("< bestmove")), { timeout: 10_000 }).toBe(true);
+  expect((await uci(page)).slice(mark).filter((l) => l.includes("searchmoves a4a5"))).toEqual([]);
+  await expect(page.getByTestId("look-note")).toHaveCount(0);
 });
 
 // 최종 리뷰 A·B I1: 엔진이 쉬고 있으면 판이 바뀌자마자 진행 중인 판의 탐색이 시작된다 — 그 첫 탐색부터 Hash 64 · MultiPV 5.

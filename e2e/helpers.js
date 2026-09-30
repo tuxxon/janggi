@@ -21,14 +21,23 @@ export async function openIsolated(page, path = "/janggi/", { analysis = "fast",
 }
 
 // 판 좌표(교차점 r,c)를 화면 좌표로: 브라우저의 getScreenCTM 을 쓴다(viewBox·테두리가 바뀌어도 맞다).
-export async function clickBoard(page, r, c) {
+async function boardPoint(page, r, c) {
   const svg = page.locator("svg[data-fen]");
   await svg.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  const { x, y } = await svg.evaluate((el, [r, c]) => {
+  return svg.evaluate((el, [r, c]) => {
     const pt = el.createSVGPoint(); pt.x = 40 + c * 60; pt.y = 40 + r * 60;
     const s = pt.matrixTransform(el.getScreenCTM()); return { x: s.x, y: s.y };
   }, [r, c]);
-  await page.mouse.click(x, y);
+}
+// options: page.mouse.click 의 옵션(오른쪽 클릭은 { button: "right" }).
+export async function clickBoard(page, r, c, options) {
+  const { x, y } = await boardPoint(page, r, c);
+  await page.mouse.click(x, y, options);
+}
+// 누르지 않고 마우스만 올린다(마우스 미리 보기, 사용자 요청 2026-09-30).
+export async function hoverBoard(page, r, c) {
+  const { x, y } = await boardPoint(page, r, c);
+  await page.mouse.move(x, y);
 }
 
 // UCI 기록: 앱이 엔진에 보낸 명령("> ...")과 엔진의 uciok·readyok·bestmove 줄("< ...")을 window.__uci 에 쌓는다.

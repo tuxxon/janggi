@@ -34,7 +34,7 @@ export const MODES = ["fast", "deep", "continuous"];
 // (반복 금지보다 n번 반복 무승부가 먼저 걸리지 않게). 수순은 gameAnalysis.enginePositions 가 붙인다.
 export const KAKAO = { name: "janggikakao", path: "/janggi-kakao.ini",
   ini: "[janggikakao:janggicasual]\nmoveRepetitionIllegal = true\nnFoldRule = 4\n" };
-export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 60000, max: 3000, max20: 20000, focus: 500 };
+export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 60000, max: 3000, max20: 20000, focus: 500, look: 30000 };
 // 저장된 판 복기의 2단계 깊게 보기 상한(개정 2.10). 무제한은 Infinity(go infinite). 1분 이상이면 Hash 256.
 export const DEEP_CAPS = [20000, 60000, 300000, Infinity];
 const LONG_CAP = 60000, LONG_HASH = 256;
@@ -69,8 +69,12 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   let network = null, networkChange = null, configuring = false;
   // maxTime: 최강 탐색의 생각 시간(3초·20초, 사용자 요청 2026-09-30). 바꾸면 다음 최강 탐색부터.
   let maxTime = MOVETIME.max;
+  // look: 오른쪽 클릭 30초 깊게 보기(사용자 요청 2026-09-30) — 한 국면의 한 수. spent: 끊기기 전까지 읽은 시간(ms),
+  // depth·last: 보낸 가장 깊은 정확한 줄. 초점에 끊기면 남은 시간으로 이어 읽고, 판이 바뀌거나 다른 수를 고르면 버린다.
+  let look = null;
   const waiters = new Set();
-  let status = { state: "loading", pending: 0, nnue: "off", reason: null, deepening: false, deepSince: null, maxSince: null, maxMovetime: null };
+  let status = { state: "loading", pending: 0, nnue: "off", reason: null, deepening: false, deepSince: null, maxSince: null, maxMovetime: null,
+    lookSince: null, lookSpent: null };
   // deepSince: 달리는 깊게 보기가 시작된 시각(ms) — 막대가 읽은 초를 센다. 선점 뒤 다시 시작하면 새로 센다.
   // maxSince·maxMovetime: 달리는 최강 탐색이 시작된 시각과 그 생각 시간 — 상태 줄이 "(7/20초)"를 센다.
   const maxSearch = () => !!(active?.entry.max && !active.focus && !active.deepen && !active.cancelled);
@@ -78,7 +82,9 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     const deepening = !!(active?.deepen && !active.cancelled), thinking = maxSearch();
     status = { ...status, pending: entries.filter((e) => !e.result && !e.error).length,
       deepening, deepSince: deepening ? active.started : null,
-      maxSince: thinking ? active.started : null, maxMovetime: thinking ? active.movetime : null };
+      maxSince: thinking ? active.started : null, maxMovetime: thinking ? active.movetime : null,
+      // lookSince·lookSpent: 달리는 30초 깊게 보기가 (다시) 시작된 시각과 그 전까지 읽은 시간 — 안내 줄이 "(n/30초)"를 센다.
+      lookSince: active?.look && !active.cancelled ? active.started : null, lookSpent: look ? look.spent : null };
     if (!disposed) onStatus(status);
   }
   const send = (command) => engine.postMessage(command);
@@ -137,6 +143,11 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     return mode === "continuous" && entry?.result && !entry.max && !entry.error && !entry.capped &&
       (deepCap === null || !entry.finished) ? entry : null;
   };
+  const stopLook = () => { if (active?.look) { stop(); publish(); } };
+  function cancelLook() {
+    if (!look) return;
+    look = null; stopLook(); publish();
+  }
   function cancelFocus() {
     if (!focus) return;
     const old = focus;
@@ -202,25 +213,26 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     if (networkChange || wantedHash() !== engineHash) { void configure(); return; }
     // 최강 엔진 차례는 밀린 지난 국면 분석보다 먼저 탐색한다(엔진이 수십 초 기다리지 않게). 나머지는 순서대로.
     const open = (e) => !e.result && !e.error;
-    // 우선순위: 최강 > 밀린 국면 > 초점 > 깊게 보기(할 일이 없을 때만).
+    // 우선순위: 최강 > 밀린 국면 > 초점 > 30초 깊게 보기 > 깊게 보기(할 일이 없을 때만).
     const entry = entries.find((e) => e.max && open(e)) ?? entries.find(open);
-    const target = !entry && !focus && deepenTarget();
-    if (!entry && !focus && !target) return;
+    const target = !entry && !focus && !look && deepenTarget();
+    if (!entry && !focus && !look && !target) return;
     // 2단계(cap): 저장된 판 복기의 깊게 보기. 1단계 후보는 그대로 두고 1순위만 그 상한까지 MultiPV 1 로 읽는다. 1단계 후보가
     // 없는 국면(저장된 평가만 있는 cached)은 먼저 보통 분석(1단계, MultiPV 5)을 한 번 돈다 — 목록 다섯 개(Task 1 리뷰).
     const pass = entry ?? (target && deepCap !== null && !target.first ? target : null);
     const job = pass ? { entry: pass, movetime: pass.max ? maxTime : MOVETIME[mode] }
       : focus ? { entry: focus.entry, focus, movetime: MOVETIME.focus }
+      : look ? { entry: look.entry, look, movetime: Math.max(100, MOVETIME.look - look.spent) }
       : { entry: target, deepen: true, movetime: deepCap ?? MOVETIME.deepen, ...(deepCap !== null ? { cap: deepCap } : {}) };
     active = { ...job, gameId, mode, lines: new Map(), cancelled: false, started: Date.now() };
     // 무제한은 끝이 없으므로 isready 탐침으로 감시한다. 상한이 있으면 상한 + 여유.
     if (job.movetime === Infinity) probe(active); else watch(job.movetime + RESPONSE_TIMEOUT);
     try {
       // 최강 수와 2단계는 MultiPV 1: 후보 5개를 함께 탐색하면 최선수에 쓸 시간이 나뉘어 약해진다(리뷰, 개정 2.10 실측).
-      send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : (job.entry.max || job.cap !== undefined) ? 1 : 5}`);
+      send(`setoption name MultiPV value ${job.focus ? job.focus.moves.length : (job.entry.max || job.cap !== undefined || job.look) ? 1 : 5}`);
       send(job.entry.position ?? `position fen ${job.entry.fen}`);
       // 반복수로 막힌 수가 있는 국면은 루트 수를 제한한다(searchmoves). 초점 분석은 원래 그 기물의 수만 본다.
-      const roots = job.focus ? job.focus.moves : job.entry.searchmoves;
+      const roots = job.focus ? job.focus.moves : job.look ? [job.look.move] : job.entry.searchmoves;
       send(`go ${job.movetime === Infinity ? "infinite" : `movetime ${job.movetime}`}${roots ? " searchmoves " + roots.join(" ") : ""}`);
       publish();
     } catch (error) { void fail(error); }
@@ -277,6 +289,11 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
         active.primary = parsed; // 평가(점수·깊이)는 가장 최근의 정확한 1순위 줄
         if (active.cap !== undefined && !active.cancelled) countStable(active.entry, parsed);
         if (active.moveNow) hurry(active); // 평가 줄을 기다리던 지금 두기
+        // 30초 깊게 보기: 보낸 것보다 깊은 정확한 줄마다(끊긴 뒤 다시 시작한 얕은 줄은 보내지 않는다).
+        if (active.look && !active.cancelled && parsed.candidate && parsed.depth > active.look.depth) {
+          active.look.depth = parsed.depth; active.look.last = parsed.candidate;
+          active.look.onUpdate({ ...parsed.candidate, done: false });
+        }
       }
     }
     // 깊게 보기는 점진 결과: 묶음의 마지막 순위가 왔을 때, 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
@@ -301,7 +318,13 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     clearTimeout(timer);
     const job = active;
     active = null;
-    if (job.deepen) {
+    if (job.look) {
+      // 끊긴 것(초점)은 읽은 시간을 더해 두고 이어 읽는다. 버린 것(다른 수·새 국면)은 job.look !== look 이다.
+      if (job.look === look) {
+        if (job.cancelled) look.spent += Date.now() - job.started;
+        else { look = null; if (job.look.last) job.look.onUpdate({ ...job.look.last, done: true }); }
+      }
+    } else if (job.deepen) {
       if (!job.cancelled) job.entry.capped = true; // 상한까지 다 읽었다(선점으로 멈춘 것은 나중에 이어서 본다)
     } else if (!job.cancelled) {
       const candidates = candidatesOf(job.lines, job.primary);
@@ -371,7 +394,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
         !!entries[common].max === !!positions[common].max && entries[common].position === positions[common].position &&
         String(entries[common].searchmoves ?? "") === String(positions[common].searchmoves ?? "")) common++;
       const changed = id !== gameId || common !== entries.length || common !== positions.length;
-      if (changed) { cancelFocus(); stopDeepening(); } // 새 수가 붙어도 깊게 보기는 멈추고 새 국면부터 본다
+      if (changed) { cancelFocus(); cancelLook(); stopDeepening(); } // 새 수가 붙어도 깊게 보기는 멈추고 새 국면부터 본다
       if (common < entries.length || id !== gameId) stop();
       for (const entry of entries.slice(common)) settle(entry, null);
       // 최강 수를 둔 뒤 max 가 풀린 국면은 새 항목이 되지만, 앱은 그 탐색을 저장한 평가(known)를 넘기므로 다시 탐색하지 않는다
@@ -400,9 +423,19 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       if (!entry || !moves.length || disposed || status.state === "disabled") return Promise.resolve(null);
       focus = { ...deferred(), entry, moves: [...new Set(moves)] };
       const promise = focus.promise;
-      stopDeepening(); pump(); return promise;
+      stopDeepening(); stopLook(); pump(); return promise;
     },
     cancelFocus,
+    // 30초 깊게 보기: ply 국면의 move(UCI) 하나만 MultiPV 1 로 30초. onUpdate({ move, cp|mate, win, depth, done }) —
+    // 두는 쪽 기준, 더 깊은 정확한 줄마다 done: false, 다 읽으면 마지막 줄로 done: true. 다른 look 은 바꾼다.
+    look(ply, move, onUpdate) {
+      const entry = entries.find((e) => e.ply === ply);
+      if (!entry || disposed || status.state === "disabled") return;
+      stopLook();
+      look = { entry, move, onUpdate, spent: 0, depth: 0, last: null };
+      stopDeepening(); publish(); pump();
+    },
+    cancelLook,
     setMode(next) {
       if (checkMode(next) === mode) return;
       mode = next;
@@ -436,7 +469,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     },
     setNetwork(bytes, name = networkName) {
       if (status.state === "disabled") return Promise.reject(new Error(status.reason));
-      cancelFocus();
+      cancelFocus(); cancelLook();
       network = bytes; networkName = name;
       networkChange?.resolve();
       networkChange = deferred();
