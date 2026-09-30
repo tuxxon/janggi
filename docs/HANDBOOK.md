@@ -4,9 +4,8 @@
 [`docs/superpowers/specs/2026-09-28-janggi-mcp-design.md`](superpowers/specs/2026-09-28-janggi-mcp-design.md) (개정 2.12).
 
 - 저장소: `~/workspace/janggi` · GitHub [tuxxon/janggi](https://github.com/tuxxon/janggi) (public)
-- 기준: 2026-09-30, 브랜치 `max-think-time` (이 문서를 고친 커밋)
-- 진행 중 브랜치: `max-think-time` — `review-deep-look` 위에 사용자 요청 세 개(2026-09-30): 막대에 깊게 보기 읽은 초 `3018f1b`, 계속 모드 상한 20초 → 1분 `2369802`, **최강 · 20초**와 지금 두기(개정 2.12). main 병합은 사용자 확인 뒤.
-- 그 아래 브랜치: `review-deep-look` — **복기 깊게 보기**(저장된 판 복기 전용, 개정 2.10). 리뷰 끝, main 병합은 사용자 확인 뒤. 그 전 것("더 깊이 보기", "한글 기물 이름", 반복수 수정 `76e38ba`)은 main 에 있다.
+- 기준: 2026-09-30, `main` (이 문서를 고친 커밋)
+- 2026-09-30 main 에 병합(fast-forward, 사용자 확인): **복기 깊게 보기**(저장된 판 복기 전용, 개정 2.10 — 브랜치 `review-deep-look`)와 그 위의 사용자 요청 세 개 — 막대에 깊게 보기 읽은 초 `3018f1b`, 계속 모드 상한 20초 → 1분 `2369802`, **최강 · 20초**와 지금 두기 `d421ccb`·리뷰 수정 `7e06533`(개정 2.11·2.12). 로컬 브랜치 `review-deep-look`·`max-think-time` 은 병합돼 남아 있다.
 - **Flutter 앱 "장기9단"**: `~/workspace/janggi-flutter`(비공개). 이어서 할 때는 그 저장소의 `docs/HANDOFF-2026-09-29-m0.md` 부터.
 
 ---
@@ -175,5 +174,5 @@ e2e/                   smoke / review / settings / analysis .spec.js + helpers.j
 | FSF 반복 금지는 쉬기 너머까지 센다(우리 규칙: 쉬기면 다시) | 전체 수순이 아니라 마지막 쉬기 이후만 보낸다(실측: 한이 쉰 뒤 a1a2 를 전체 수순으로 보내면 금지로 본다) |
 | ini 로 정의한 변형은 부모의 NNUE 별칭("janggi")을 잃는다 → 신경망이 조용히 꺼졌다(e2e 가 잡음) | 엔진 안 파일 이름을 `/janggikakao-<name>` 으로 |
 | 스레드가 코어의 절반(이 맥 7)이라 병렬 e2e 워커끼리 CPU를 다퉈 서비스워커 첫 방문 격리가 20초를 넘겼다(평소 실행 4번 중 1번, main 은 0번) | `openIsolated`가 기본으로 코어 2개(엔진 1스레드)로 보이게 하고, 저장된 값이 없으면 "빠르게"를 심는다. 실제 스레드·계속 모드는 `analysis.spec.js`와 WebKit 스모크가 `cores: null`로 본다 |
-| main 빌드(`LEVELS` 에 max20 없음)를 같은 주소(localhost:5173)에서 띄우면 max20 최신 판이 검증에 걸려 `janggi.index` 에 "손상됨"이 기록되고, 이 브랜치로 돌아와도 목록에 손상됨으로 남는다(기록 자체는 멀쩡, 전체 내보내기엔 들어간다 — 리뷰 LOW 2026-09-30) | `max-think-time` 을 main 에 합치기 전엔 같은 주소에서 main 을 띄우지 않는다 |
+| 최강 · 20초 이전 빌드(`LEVELS` 에 max20 없음, main `774a062` 까지)를 같은 주소(localhost:5173)에서 띄우면 max20 최신 판이 검증에 걸려 `janggi.index` 에 "손상됨"이 기록되고, 이 브랜치로 돌아와도 목록에 손상됨으로 남는다(기록 자체는 멀쩡, 전체 내보내기엔 들어간다 — 리뷰 LOW 2026-09-30) | 2026-09-30 main 에 합쳐져 main 은 괜찮다. 옛 커밋을 같은 주소에서 띄우지 않는다(찍힌 손상됨은 `janggi.index` 의 그 항목 status 를 지워야 풀린다) |
 | `toHaveCount(0)` 은 재시도한다: 3초 최강 탐색 중 "시계 없음"을 단언하면 탐색이 끝나 시계가 저절로 사라질 때까지 기다려 가드를 빼도 통과했다(뮤테이션으로 발견, 2026-09-30) | 없어야 할 것을 단언할 땐 그것이 계속 있을 상황(20초 탐색 중)에서 한다 |
