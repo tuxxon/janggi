@@ -506,6 +506,23 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     expect(engine.searches.at(-1)).toBe("go movetime 20000");
     expect(service.status.deepening).toBe(true);
   });
+  it("continuous: status.deepSince is when the running deep look started, and null otherwise", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const { service, engine } = setup({ mode: "continuous" });
+    service.sync("g", [position(0)]); await service.ready;
+    expect(service.status.deepSince).toBe(null);                  // 0.8초 1차 분석
+    vi.setSystemTime(2000); engine.finish(); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(service.status.deepSince).toBe(2000);
+    vi.setSystemTime(5000);
+    service.sync("g", [position(0), position(1)]);                // 새 수가 깊게 보기를 멈춘다
+    expect(service.status.deepSince).toBe(null);
+    engine.emit("bestmove a4a5"); await tick();                   // 새 국면의 1차 분석
+    expect(service.status.deepSince).toBe(null);
+    vi.setSystemTime(6000); engine.finish(); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(service.status.deepSince).toBe(6000);                  // 새 국면의 깊게 보기는 새로 센다
+  });
   it("continuous: reports progressively only when a deeper depth than already shown arrives", async () => {
     const { service, engine, results } = setup({ mode: "continuous" });
     service.sync("g", [position(0)]); await service.ready;

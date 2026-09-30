@@ -25,6 +25,11 @@ test("분석 선택지는 기본이 '계속'이고, 고른 모드는 새로고�
 test("계속: 깊이가 시간이 지나며 커지고 '계속 분석 중'을 보여주며, 빠르게로 바꾸면 바로 멈춘다", async ({ page }) => {
   await openIsolated(page, "/janggi/", { analysis: "continuous", cores: null });
   await expect(bar(page)).toContainText("계속 분석 중", { timeout: 30_000 });
+  // 깊게 읽은 시간을 초로 센다(사용자 요청 2026-09-30): 화면에서 실제로 올라간다.
+  const secondsOf = async () => Number(/계속 분석 중 \((\d+)초\)/.exec(await bar(page).textContent())?.[1] ?? NaN);
+  const s0 = await secondsOf();
+  expect(s0).toBeGreaterThanOrEqual(0);
+  await expect.poll(secondsOf, { timeout: 5_000 }).toBeGreaterThan(s0);
   const first = await depthOf(page);
   expect(first).toBeGreaterThan(0);
   await expect.poll(() => depthOf(page), { timeout: 25_000 }).toBeGreaterThan(first);

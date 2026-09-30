@@ -130,6 +130,17 @@ describe("deeper analysis settings (user request 2026-09-29)", () => {
     expect(bar({ pending: 2, deepening: false })).toContain("분석 중 (2개 남음)");
   });
 });
+  it("counts the seconds of the running deep look on the win bar", () => {
+    vi.useFakeTimers(); vi.setSystemTime(100_000);
+    const bar = (status) => renderToStaticMarkup(createElement(WinBar, { a: { win: 55, depth: 18 }, fen: "f",
+      status: { state: "ready", pending: 0, nnue: "on", ...status } }));
+    try {
+      expect(bar({ deepening: true, deepSince: 93_000 })).toContain("깊이 18 · 계속 분석 중 (7초)<");
+      expect(bar({ deepening: true, deepSince: 100_000 })).toContain("계속 분석 중 (0초)<");
+      expect(bar({ deepening: true, deepSince: 35_000 })).toContain("계속 분석 중 (1분 5초)<");
+      expect(bar({ deepening: false, deepSince: null })).toContain("깊이 18<");
+    } finally { vi.useRealTimers(); }
+  });
 
 describe("review deep look (spec 2.10: saved-game review only)", () => {
   const bar = (status, stable) => renderToStaticMarkup(createElement(WinBar, { a: { win: 55, depth: 18 }, fen: "f", stable,

@@ -52,9 +52,18 @@ function Piece({ p, x, y, selected, lifted }) {
 // stable: 저장된 판 복기의 2단계 결과면 "같은 수 N깊이째"의 N(개정 2.10), 아니면 null.
 export function WinBar({ a, status, fen, stable = null }) {
   const w = a?.win ?? null;
+  // 깊게 보기가 달리는 동안 1초마다 다시 그려 읽은 초를 센다(사용자 요청 2026-09-30).
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (status.deepSince == null) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [status.deepSince]);
+  const secs = status.deepSince != null ? Math.max(0, Math.floor((Date.now() - status.deepSince) / 1000)) : null;
+  const elapsed = secs == null ? "" : ` (${secs < 60 ? "" : `${Math.floor(secs / 60)}분 `}${secs % 60}초)`;
   const note = status.state === "disabled" ? status.reason : status.state === "loading" ? "엔진 준비 중…"
     : status.pending ? `분석 중 (${status.pending}개 남음)`
-    : a ? `깊이 ${a.depth}${stable != null ? ` · 같은 수 ${stable}깊이째` : ""}${status.deepening ? " · 계속 분석 중" : ""}` : "";
+    : a ? `깊이 ${a.depth}${stable != null ? ` · 같은 수 ${stable}깊이째` : ""}${status.deepening ? ` · 계속 분석 중${elapsed}` : ""}` : "";
   return (
     <div data-testid="winbar" data-nnue={status.nnue} data-cho-win={w != null ? w.toFixed(1) : ""} data-fen={a ? fen : ""} style={{ margin: "6px 0 4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 700 }}>

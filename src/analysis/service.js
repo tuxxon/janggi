@@ -64,10 +64,12 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   let available = false, disposed = false, failures = 0, generation = 0, timer;
   let network = null, networkChange = null, configuring = false;
   const waiters = new Set();
-  let status = { state: "loading", pending: 0, nnue: "off", reason: null, deepening: false };
+  let status = { state: "loading", pending: 0, nnue: "off", reason: null, deepening: false, deepSince: null };
+  // deepSince: 달리는 깊게 보기가 시작된 시각(ms) — 막대가 읽은 초를 센다. 선점 뒤 다시 시작하면 새로 센다.
   function publish() {
+    const deepening = !!(active?.deepen && !active.cancelled);
     status = { ...status, pending: entries.filter((e) => !e.result && !e.error).length,
-      deepening: !!(active?.deepen && !active.cancelled) };
+      deepening, deepSince: deepening ? active.started : null };
     if (!disposed) onStatus(status);
   }
   const send = (command) => engine.postMessage(command);
@@ -195,7 +197,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     const job = pass ? { entry: pass, movetime: pass.max ? MOVETIME.max : MOVETIME[mode] }
       : focus ? { entry: focus.entry, focus, movetime: MOVETIME.focus }
       : { entry: target, deepen: true, movetime: deepCap ?? MOVETIME.deepen, ...(deepCap !== null ? { cap: deepCap } : {}) };
-    active = { ...job, gameId, mode, lines: new Map(), cancelled: false };
+    active = { ...job, gameId, mode, lines: new Map(), cancelled: false, started: Date.now() };
     // 무제한은 끝이 없으므로 isready 탐침으로 감시한다. 상한이 있으면 상한 + 여유.
     if (job.movetime === Infinity) probe(active); else watch(job.movetime + RESPONSE_TIMEOUT);
     try {
