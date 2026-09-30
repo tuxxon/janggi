@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openIsolated, clickBoard } from "./helpers.js";
 
-// "더 깊이 보기" (사용자 요청 2026-09-29): 분석 모드 빠르게·깊게·계속, 계속은 보고 있는 국면을 최대 20초 깊게 읽는다.
+// "더 깊이 보기" (사용자 요청 2026-09-29): 분석 모드 빠르게·깊게·계속, 계속은 보고 있는 국면을 최대 1분(처음엔 20초, 사용자 요청 2026-09-30) 깊게 읽는다.
 const OLD = "2026-09-27T10-00-00-000", LIVE = "2026-09-28T10-00-00-000";
 const rec = (id, createdAt, extra) => ({ v: 1, id, createdAt, setups: { c: "마상마상", h: "마상마상" },
   controllers: { c: "human", h: "engine" }, level: 3, moves: [], result: null, ...extra });
@@ -75,7 +75,7 @@ test("계속: 깊게 읽는 중에도 기물을 집으면 수마다 승률이 �
   await expect(bar(page)).toContainText("계속 분석 중", { timeout: 30_000 });
   await page.getByLabel("후보 수 보기").check();
   await clickBoard(page, 6, 0);                                                  // 초 a4 졸
-  // 초점 분석(0.5초)이 20초짜리 깊게 보기가 끝나기를 기다리지 않는다.
+  // 초점 분석(0.5초)이 1분짜리 깊게 보기가 끝나기를 기다리지 않는다.
   await expect(page.getByTestId("target-win")).toHaveCount(2, { timeout: 5_000 });
   await clickBoard(page, 5, 0);                                                  // a4→a5
   const after = await page.locator("svg[data-fen]").getAttribute("data-fen");

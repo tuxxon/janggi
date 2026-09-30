@@ -40,8 +40,8 @@ describe("game analysis integration", () => {
     const g = play(initial(), [54, 45]);
     const base = { gameId: g.id, fen: integration.analysisPositions(g)[0].fen, ply: 0, cp: 0, win: 50, depth: 20, candidates: [] };
     const engine = (result) => integration.cacheEvaluation(integration.syncAnalysisCache(null, g), g, { ...base, ...result }).analysis.engine;
-    expect(engine({ nnue: "on", mode: "continuous", threads: 7, movetime: 20000 })).toBe(
-      "fairy-stockfish-nnue.wasm 1.1.12 janggikakao nnue=janggi-9991472750de mode=continuous movetime=800 deepen-movetime=20000 max-movetime=3000 threads=7");
+    expect(engine({ nnue: "on", mode: "continuous", threads: 7, movetime: 60000 })).toBe(
+      "fairy-stockfish-nnue.wasm 1.1.12 janggikakao nnue=janggi-9991472750de mode=continuous movetime=800 deepen-movetime=60000 max-movetime=3000 threads=7");
     expect(engine({ nnue: "off", mode: "deep", threads: 4, movetime: 3000 })).toBe(
       "fairy-stockfish-nnue.wasm 1.1.12 janggikakao nnue=off mode=deep movetime=3000 max-movetime=3000 threads=4");
     expect(engine({ nnue: "off", mode: "fast", threads: 1, movetime: 800 })).toBe(

@@ -112,6 +112,7 @@ describe("deeper analysis settings (user request 2026-09-29)", () => {
     expect(options).toMatch(/<option value="fast">빠르게/);
     expect(options).toMatch(/<option value="deep">깊게/);
     expect(options).toMatch(/<option value="continuous" selected="">계속/);
+    expect(options).toContain(">계속 · 다음 수까지 최대 1분</option>");   // 사용자 요청 2026-09-30: 20초 → 1분
   });
   it("restores the remembered mode from janggi.prefs", () => {
     vi.stubGlobal("localStorage", fake({ "janggi.prefs": '{"analysis":"fast"}' }));
@@ -129,7 +130,6 @@ describe("deeper analysis settings (user request 2026-09-29)", () => {
     expect(bar({ deepening: false })).not.toContain("계속 분석 중");
     expect(bar({ pending: 2, deepening: false })).toContain("분석 중 (2개 남음)");
   });
-});
   it("counts the seconds of the running deep look on the win bar", () => {
     vi.useFakeTimers(); vi.setSystemTime(100_000);
     const bar = (status) => renderToStaticMarkup(createElement(WinBar, { a: { win: 55, depth: 18 }, fen: "f",
@@ -141,6 +141,7 @@ describe("deeper analysis settings (user request 2026-09-29)", () => {
       expect(bar({ deepening: false, deepSince: null })).toContain("깊이 18<");
     } finally { vi.useRealTimers(); }
   });
+});
 
 describe("review deep look (spec 2.10: saved-game review only)", () => {
   const bar = (status, stable) => renderToStaticMarkup(createElement(WinBar, { a: { win: 55, depth: 18 }, fen: "f", stable,

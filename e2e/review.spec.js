@@ -366,7 +366,7 @@ test("깊게 보기 상한은 새로고침해도 기억한다", async ({ page })
   expect(await page.evaluate(() => localStorage.getItem("janggi.prefs"))).toBe('{"analysis":"fast","reviewDeep":"infinite"}');
 });
 
-test("저장된 판 복기를 떠나면 상한·Hash 256 이 풀리고, 진행 중인 판과 그 복기는 MultiPV 5 · 20초 · Hash 64 그대로다", async ({ page }) => {
+test("저장된 판 복기를 떠나면 상한·Hash 256 이 풀리고, 진행 중인 판과 그 복기는 MultiPV 5 · 1분 · Hash 64 그대로다", async ({ page }) => {
   await logUci(page);
   await seed(page, [live, old], { analysis: "continuous" });
   await expect.poll(async () => (await uci(page)).includes("< readyok"), { timeout: 30_000 }).toBe(true);
@@ -382,23 +382,23 @@ test("저장된 판 복기를 떠나면 상한·Hash 256 이 풀리고, 진행 �
   // 돌아온 다음 진행 중인 판의 첫 탐색이 돈다. 깊게 보기는 지금 "계속"이다. 엔진이 쉬고 있을 때 떠나는 경우는 다음 테스트.
   let mark = (await uci(page)).length;
   await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
-  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 20000"), { timeout: 30_000 }).toBe(true);
-  let after = (await uci(page)).slice(mark), deep = after.indexOf("> go movetime 20000"), first = after.findIndex(isGo);
+  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 60000"), { timeout: 30_000 }).toBe(true);
+  let after = (await uci(page)).slice(mark), deep = after.indexOf("> go movetime 60000"), first = after.findIndex(isGo);
   expect(after.slice(0, first).filter(isHash)).toEqual(["> setoption name Hash value 64"]);          // 첫 탐색 전에
   expect(after.slice(0, first).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
   expect(after.slice(0, deep).filter(isHash)).toEqual(["> setoption name Hash value 64"]);
   expect(after.slice(0, deep).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
-  expect(after.filter(isGo).filter((c) => !/^> go movetime (800|20000)$/.test(c))).toEqual([]);
+  expect(after.filter(isGo).filter((c) => !/^> go movetime (800|60000)$/.test(c))).toEqual([]);
 
   // 진행 중인 판의 복기도 상한 없이 지금 "계속" 그대로(Hash 를 바꾸지 않는다).
   mark = (await uci(page)).length;
   await openGame(page, 0);
   await expect(status(page)).toHaveText("복기 중 · 0/1수");
-  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 20000"), { timeout: 30_000 }).toBe(true);
-  after = (await uci(page)).slice(mark); deep = after.indexOf("> go movetime 20000");
+  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 60000"), { timeout: 30_000 }).toBe(true);
+  after = (await uci(page)).slice(mark); deep = after.indexOf("> go movetime 60000");
   expect(after.filter(isHash)).toEqual([]);
   expect(after.slice(0, deep).filter(isMultiPV).at(-1)).toBe("> setoption name MultiPV value 5");
-  expect(after.filter(isGo).filter((c) => !/^> go movetime (800|20000)$/.test(c))).toEqual([]);
+  expect(after.filter(isGo).filter((c) => !/^> go movetime (800|60000)$/.test(c))).toEqual([]);
 });
 
 // 최종 리뷰 A·B I1: 엔진이 쉬고 있으면 판이 바뀌자마자 진행 중인 판의 탐색이 시작된다 — 그 첫 탐색부터 Hash 64 · MultiPV 5.

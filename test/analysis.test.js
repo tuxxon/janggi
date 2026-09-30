@@ -496,14 +496,14 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     service.sync("g", [position(0), position(1)]); await tick();
     expect(engine.searches.at(-1)).toBe("go movetime 800");
   });
-  it("continuous: after the quick pass, deepens the last ply with a 20 s cap when idle", async () => {
+  it("continuous: after the quick pass, deepens the last ply with a 1 min cap when idle", async () => {
     const { service, engine } = setup({ mode: "continuous" });
     service.sync("g", [position(0), position(1)]); await service.ready;
     engine.finish(); await tick();
     expect(engine.searches.at(-1)).toBe("go movetime 800");
     engine.finish(); await tick();
     expect(engine.positions.at(-1)).toBe("position fen fen-1");
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
     expect(service.status.deepening).toBe(true);
   });
   it("continuous: status.deepSince is when the running deep look started, and null otherwise", async () => {
@@ -512,7 +512,7 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     service.sync("g", [position(0)]); await service.ready;
     expect(service.status.deepSince).toBe(null);                  // 0.8초 1차 분석
     vi.setSystemTime(2000); engine.finish(); await tick();
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
     expect(service.status.deepSince).toBe(2000);
     vi.setSystemTime(5000);
     service.sync("g", [position(0), position(1)]);                // 새 수가 깊게 보기를 멈춘다
@@ -520,7 +520,7 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     engine.emit("bestmove a4a5"); await tick();                   // 새 국면의 1차 분석
     expect(service.status.deepSince).toBe(null);
     vi.setSystemTime(6000); engine.finish(); await tick();
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
     expect(service.status.deepSince).toBe(6000);                  // 새 국면의 깊게 보기는 새로 센다
   });
   it("continuous: reports progressively only when a deeper depth than already shown arrives", async () => {
@@ -540,7 +540,7 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     const { service, engine } = setup({ mode: "continuous" });
     service.sync("g", [position(0)]); await service.ready;
     engine.finish(); await tick();
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
     service.sync("g", [position(0), position(1)]);
     expect(engine.commands.at(-1)).toBe("stop");
     engine.emit("bestmove a4a5"); await tick();
@@ -557,7 +557,7 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     expect(engine.searches.at(-1)).toBe("go movetime 500 searchmoves a4a5");
     engine.finish(3, "a4a5"); await tick();
     await expect(focused).resolves.toHaveLength(1);
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
   });
   it("deepen(ply) moves deepening to another ply (review), deepen(null) returns to the last ply", async () => {
     const { service, engine } = setup({ mode: "continuous" });
@@ -568,7 +568,7 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     expect(engine.commands.at(-1)).toBe("stop");
     engine.emit("bestmove a4a5"); await tick();
     expect(engine.positions.at(-1)).toBe("position fen fen-0");
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
     service.deepen(null);
     engine.emit("bestmove a4a5"); await tick();
     expect(engine.positions.at(-1)).toBe("position fen fen-1");
@@ -578,13 +578,13 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     service.sync("g", [position(0)]); await service.ready;
     engine.finish(); await tick();
     const count = engine.searches.length;                                     // 깊게 보기까지 시작했다
-    engine.emit(line(20, 5)); engine.emit("bestmove a4a5"); await tick();   // 20초 상한까지 다 읽었다
+    engine.emit(line(20, 5)); engine.emit("bestmove a4a5"); await tick();   // 1분 상한까지 다 읽었다
     expect(engine.searches).toHaveLength(count);
     service.setMode("fast");
     expect(engine.searches).toHaveLength(count);
     service.setMode("continuous"); await tick();
     expect(engine.searches).toHaveLength(count + 1);
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
   });
   it("switching to fast stops an active deepening search", async () => {
     const { service, engine } = setup({ mode: "continuous" });
@@ -609,12 +609,12 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     service.sync("g", [position(0)]);
     await vi.advanceTimersByTimeAsync(0); await service.ready;
     engine.finish(); await vi.advanceTimersByTimeAsync(0);
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
     // 재시작해도 같은 가짜 엔진이 다시 ready 가 되므로 state 가 아니라 재시작(uci 재전송)을 센다.
     const starts = () => engine.commands.filter((c) => c === "uci").length;
-    await vi.advanceTimersByTimeAsync(34_000);
+    await vi.advanceTimersByTimeAsync(74_000);
     expect(starts()).toBe(1);
-    await vi.advanceTimersByTimeAsync(2_000);        // 20초 + 15초가 지나도 bestmove 가 없으면 여전히 실패로 본다
+    await vi.advanceTimersByTimeAsync(2_000);        // 1분 + 15초가 지나도 bestmove 가 없으면 여전히 실패로 본다
     expect(starts()).toBe(2);
   });
   it("continuous: with MultiPV, reports once the whole ranked batch of the deeper iteration has arrived (found in screenshots)", async () => {
@@ -674,7 +674,7 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     engine.emit("bestmove a4a5"); await tick();                // 상한까지 다 읽었다
     const applied = service.setNetwork(null); await applied; await tick();
     engine.finish(); await tick();                             // 새 평가로 빠른 분석
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
   });
   it("results record the analysis mode and thread count (for the record's engine string)", async () => {
     const { service, engine, results } = setup({ mode: "continuous", threads: 7 });
@@ -682,7 +682,7 @@ describe("deeper analysis (user request 2026-09-29)", () => {
     engine.finish(); await tick();
     expect(results[0]).toMatchObject({ mode: "continuous", threads: 7, movetime: 800 });
     engine.emit(line(20, 5));
-    expect(results.at(-1)).toMatchObject({ mode: "continuous", threads: 7, movetime: 20000, depth: 20 });
+    expect(results.at(-1)).toMatchObject({ mode: "continuous", threads: 7, movetime: 60000, depth: 20 });
   });
   it("rejects an unknown mode instead of silently picking one", () => {
     expect(() => setup({ mode: "slow" })).toThrow("분석 모드");
@@ -750,7 +750,7 @@ describe("review A fixes (2026-09-29)", () => {
 
 describe("review B test gaps (2026-09-29)", () => {
   const line = (depth, cp, move = "a4a5", rank = 1) => `info depth ${depth} multipv ${rank} score cp ${cp} nodes 100 pv ${move}`;
-  const deepening = (engine) => { const go = engine.commands.lastIndexOf("go movetime 20000"); return engine.commands.slice(0, go + 1); };
+  const deepening = (engine) => { const go = engine.commands.lastIndexOf("go movetime 60000"); return engine.commands.slice(0, go + 1); };
   it("deepens with MultiPV 5 so the hint list keeps five candidates", async () => {
     const { service, engine } = setup({ mode: "continuous" });
     service.sync("g", [position(0)]); await service.ready;
@@ -761,7 +761,7 @@ describe("review B test gaps (2026-09-29)", () => {
     const { service, engine } = setup({ mode: "continuous" });
     service.sync("g", [position(0, "c", { searchmoves: ["a1a3", "e2e2"] })]); await service.ready;
     engine.finish(); await tick();
-    expect(engine.searches.at(-1)).toBe("go movetime 20000 searchmoves a1a3 e2e2");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000 searchmoves a1a3 e2e2");
   });
   it("deepen(other) starts deepening right away when the engine is idle after a capped ply", async () => {
     const { service, engine } = setup({ mode: "continuous" });
@@ -839,18 +839,18 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     return s;
   }
 
-  it("cap null keeps the live game's deepening: MultiPV 5, go movetime 20000 and no Hash change", async () => {
+  it("cap null keeps the live game's deepening: MultiPV 5, go movetime 60000 and no Hash change", async () => {
     const { service, engine, results } = setup({ mode: "continuous", hash: 64 });
     service.sync("g", [position(0), position(1)]); service.deepen(0, null); await service.ready;
     engine.finish(); await tick(); firstPass(engine); await tick();
-    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 5", "position fen fen-0", "go movetime 20000"]);
+    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 5", "position fen fen-0", "go movetime 60000"]);
     engine.emit(line(14, 40, "a4a5")); engine.emit(line(14, 20, "b1c3", 2));
-    expect(results.at(-1)).toMatchObject({ ply: 0, depth: 14, movetime: 20000 });
+    expect(results.at(-1)).toMatchObject({ ply: 0, depth: 14, movetime: 60000 });
     expect(results.at(-1)).not.toHaveProperty("stable");
     expect(results.at(-1)).not.toHaveProperty("deepCap");
     service.deepen(1);                                                     // 인수 하나(지금 useAnalysis)도 그대로
     engine.emit("bestmove a4a5"); await tick();
-    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 5", "position fen fen-1", "go movetime 20000"]);
+    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 5", "position fen fen-1", "go movetime 60000"]);
     expect(hashes(engine)).toEqual(["setoption name Hash value 64"]);
   });
   it("each cap deepens with MultiPV 1 and its own go command, keeping the repetition searchmoves", async () => {
@@ -922,8 +922,8 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     service.sync("g", [position(0, "c", { known: { cp: 12, win: 51.1, depth: 17 } }), position(1)]);
     service.deepen(0, null); await service.ready;
     firstPass(engine); await tick();
-    expect(engine.searches).toEqual(["go movetime 800", "go movetime 20000"]);
-    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 5", "position fen fen-0", "go movetime 20000"]);
+    expect(engine.searches).toEqual(["go movetime 800", "go movetime 60000"]);
+    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 5", "position fen fen-0", "go movetime 60000"]);
   });
   it("counts the same first-rank move over new depths (N+1), restarts at 1 when it changes, and a same-depth line resets only on a change", async () => {
     const { engine, results } = await reviewing(20000);
@@ -1048,7 +1048,7 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     expect(afterStop(engine)).toEqual(["setoption name Hash value 64", "isready",
       "setoption name MultiPV value 1", "position fen fen-0", "go movetime 20000"]);
     service.deepen(null, null); engine.emit("bestmove a4a5"); await tick();
-    expect(afterStop(engine)).toEqual(["setoption name MultiPV value 5", "position fen fen-0", "go movetime 20000"]);
+    expect(afterStop(engine)).toEqual(["setoption name MultiPV value 5", "position fen fen-0", "go movetime 60000"]);
     expect(hashes(engine)).toEqual(["setoption name Hash value 64", "setoption name Hash value 256", "setoption name Hash value 64"]);
   });
   it("Hash waits for a running first-stage search instead of stopping it", async () => {
@@ -1182,16 +1182,16 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     await vi.advanceTimersByTimeAsync(2);
     expect(starts(engine)).toBe(2);
   });
-  it("the live path (cap null) keeps its 20 s + 15 s watchdog from the start of the search, even after a stop", async () => {
+  it("the live path (cap null) keeps its 1 min + 15 s watchdog from the start of the search, even after a stop", async () => {
     vi.useFakeTimers();
     const { service, engine } = setup({ mode: "continuous", hash: 64 });
     service.sync("g", [position(0)]); service.deepen(0, null);
     await vi.advanceTimersByTimeAsync(0); await service.ready;
     firstPass(engine); await vi.advanceTimersByTimeAsync(0);
-    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
     await vi.advanceTimersByTimeAsync(10_000);
     service.haltDeepen();
-    await vi.advanceTimersByTimeAsync(24_999);
+    await vi.advanceTimersByTimeAsync(64_999);
     expect(starts(engine)).toBe(1);
     await vi.advanceTimersByTimeAsync(2);
     expect(starts(engine)).toBe(2);
@@ -1240,7 +1240,7 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     expect(engine.commands.at(-1)).toBe("stop");
     engine.emit("bestmove a4a5"); await tick();
     expect(afterStop(engine)).toEqual(["setoption name Hash value 64", "isready",
-      "setoption name MultiPV value 5", "position fen fen-0", "go movetime 20000"]);
+      "setoption name MultiPV value 5", "position fen fen-0", "go movetime 60000"]);
   });
   it("rejects a cap that is not 20000, 60000, 300000 or Infinity", () => {
     const { service } = setup({ mode: "continuous" });
@@ -1335,7 +1335,7 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
     const { service, engine } = setup({ mode: "continuous", hash: 64 });
     service.sync("live", [position(0, "c", { fen: "live-0" })]); service.deepen(null, null); await service.ready;
     engine.finish(); await tick();
-    expect(engine.commands.at(-1)).toBe("go movetime 20000");
+    expect(engine.commands.at(-1)).toBe("go movetime 60000");
     service.sync("saved", [position(0), position(1)]); service.deepen(0, 60000);
     engine.emit("bestmove a4a5"); await tick();
     firstPass(engine); await tick(); firstPass(engine); await tick();

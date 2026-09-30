@@ -21,7 +21,7 @@ const deferred = () => {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 };
-// 감시 타이머는 탐색 시간 + RESPONSE_TIMEOUT: 20초 깊게 보기가 "응답 없음"으로 끝나지 않게.
+// 감시 타이머는 탐색 시간 + RESPONSE_TIMEOUT: 1분 깊게 보기가 "응답 없음"으로 끝나지 않게.
 const RESPONSE_TIMEOUT = 15000, NETWORK_TIMEOUT = 20000;
 // 무제한(go infinite) 깊게 보기의 감시: PROBE_INTERVAL 마다 isready 를 보내 RESPONSE_TIMEOUT 안에 readyok 가 없으면 실패.
 // 엔진 줄 간격으로는 감시할 수 없다 — 깊이가 깊어질수록 한 반복의 첫 수를 읽는 동안 줄이 없다. 실측(2026-09-30, M3 Max,
@@ -34,7 +34,7 @@ export const MODES = ["fast", "deep", "continuous"];
 // (반복 금지보다 n번 반복 무승부가 먼저 걸리지 않게). 수순은 gameAnalysis.enginePositions 가 붙인다.
 export const KAKAO = { name: "janggikakao", path: "/janggi-kakao.ini",
   ini: "[janggikakao:janggicasual]\nmoveRepetitionIllegal = true\nnFoldRule = 4\n" };
-export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 20000, max: 3000, focus: 500 };
+export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 60000, max: 3000, focus: 500 };
 // 저장된 판 복기의 2단계 깊게 보기 상한(개정 2.10). 무제한은 Infinity(go infinite). 1분 이상이면 Hash 256.
 export const DEEP_CAPS = [20000, 60000, 300000, Infinity];
 const LONG_CAP = 60000, LONG_HASH = 256;
@@ -58,7 +58,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   checkMode(mode);
   // deepenPly: 깊게 볼 국면(null 이면 마지막 국면). capped: 깊게 보기를 끝낸 국면 — 상한까지 다 읽었거나, 멈춤(haltDeepen)이나
   // 엔진의 마지막 깊이로 끝났다. 다시 깊게 보지 않는다(모드·상한·신경망을 바꾸면 푼다).
-  // deepCap: null 이면 지금 "계속"(MultiPV 5 · 20초), 값이 있으면 저장된 판 복기의 2단계(MultiPV 1 · 그 상한).
+  // deepCap: null 이면 지금 "계속"(MultiPV 5 · 1분), 값이 있으면 저장된 판 복기의 2단계(MultiPV 1 · 그 상한).
   // engineHash: 엔진에 마지막으로 보낸 Hash. 원하는 값(wantedHash)과 다르면 탐색이 멈춘 뒤 pump 가 바꾼다.
   let engine, listener, gameId, entries = [], active = null, focus = null, deepenPly = null, deepCap = null, engineHash = null;
   let available = false, disposed = false, failures = 0, generation = 0, timer;
@@ -108,7 +108,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     if (active && !active.cancelled) {
       active.cancelled = true;
       // 2단계는 멈춘 뒤 bestmove 를 RESPONSE_TIMEOUT 안에 받아야 한다: 무제한은 상한이 없고, 5분 상한을 기다릴 까닭도 없다
-      // (무제한의 다음 탐침은 이것이 지운다). 진행 중인 판의 깊게 보기(cap 없음)는 지금처럼 시작 때의 20초 + 15초.
+      // (무제한의 다음 탐침은 이것이 지운다). 진행 중인 판의 깊게 보기(cap 없음)는 지금처럼 시작 때의 1분 + 15초.
       if (active.cap !== undefined) watch(RESPONSE_TIMEOUT);
       try { send("stop"); } catch (error) { void fail(error); }
     }

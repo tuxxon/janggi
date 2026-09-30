@@ -56,7 +56,7 @@ export function SettingsPanel({ seats, nowBottom, pending, level, maxReason, ana
         <select aria-label="분석" style={selStyle} value={analysisMode} onChange={(e) => onAnalysis(e.target.value)}>
           <option value="fast">빠르게 · 0.8초</option>
           <option value="deep">깊게 · 3초</option>
-          <option value="continuous">계속 · 다음 수까지 최대 20초</option>
+          <option value="continuous">계속 · 다음 수까지 최대 1분</option>
         </select>
       </label>
       {/* 알림 영역은 항상 둔다: 내용이 든 채로 새로 끼워 넣은 status 는 스크린리더가 읽지 않을 수 있다(리뷰 LOW). */}
