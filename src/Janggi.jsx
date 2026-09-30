@@ -143,8 +143,9 @@ export default function Janggi() {
   // null(지금 "계속" 그대로). 상한과 Hash 256 은 서비스 전체 값이라, 그 복기를 떠나면 null 로 되돌려야 한다.
   const savedReview = !!review && review.record.id !== g.id;
   const deepCap = savedReview ? capOf(prefs.reviewDeep) : null;
+  // 최강 생각 시간은 분석하는 판의 난이도에서: 엔진 차례로 끝난 저장된 최강 판의 복기도 그 판의 시간으로 본다(리뷰 MED).
   const analysis = useAnalysis(review ? review.state : g, { mode: prefs.analysis, deepen: review ? review.k : null, deepCap,
-    maxTime: maxTimeOf(g.level) });
+    maxTime: maxTimeOf((review ? review.state : g).level) });
   const { serviceRef } = analysis;
 
   // 판에 그릴 국면: 진행 중인 판, 또는 복기 중인 판의 k수째.
@@ -396,9 +397,10 @@ export default function Janggi() {
       <div style={{ maxWidth: 940, margin: "0 auto", padding: "18px 14px 28px", display: "flex", flexWrap: "wrap", gap: "12px 24px", alignItems: "flex-start", justifyContent: "center" }}>
       <main style={{ flex: "1 1 560px", maxWidth: 560, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-          <h1 style={{ fontSize: 32, fontWeight: 900, margin: 0, letterSpacing: "0.05em" }}>장기</h1>
+          <h1 style={{ fontSize: 32, fontWeight: 900, margin: 0, letterSpacing: "0.05em", flexShrink: 0, whiteSpace: "nowrap" }}>장기</h1>
           <div data-testid="status" style={{ fontSize: 16, color: !review && (g.over || engineError || status.includes("장군")) ? COL.h : "#261d15", fontWeight: !review && g.over ? 700 : 400 }}>{status}
-            {analysis.status.maxSince != null && <MaxClock since={analysis.status.maxSince} movetime={analysis.status.maxMovetime} onMoveNow={analysis.moveNow} />}</div>
+            {!review && analysis.status.maxSince != null && <MaxClock since={analysis.status.maxSince} movetime={analysis.status.maxMovetime}
+              onMoveNow={() => analysis.moveNow(analysis.status.maxSince)} />}</div>
         </div>
         {lastEvaluation && <div data-testid="last-evaluation" style={{ fontSize: 13, marginBottom: 4 }}>{lastEvaluation}</div>}
         {notice && <div data-testid="notice" role="status" style={{ fontSize: 13, color: COL.h, marginBottom: 4 }}>{notice}</div>}

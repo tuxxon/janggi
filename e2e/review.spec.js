@@ -384,6 +384,19 @@ test("저장된 판 복기를 떠나면 상한·Hash 256 이 풀리고, 진행 �
   expect(after.filter(isGo).filter((c) => !/^> go movetime (800|60000)$/.test(c))).toEqual([]);
 });
 
+// 리뷰(2026-09-30): 엔진 차례로 끝난 저장된 최강 · 3초 판의 복기는 진행 중인 판(최강 · 20초)의 시간이 아니라 그 판의 3초로 본다.
+// (복기 화면에 시계가 없는 것은 smoke 의 진행 중인 판 복기 테스트가 묶는다: 여기선 3초 탐색이 끝나 시계가 저절로 사라져 공허하다.)
+test("엔진 차례로 끝난 저장된 최강 · 3초 판을 복기하면 진행 중인 판의 20초가 아니라 3초로 본다 (리뷰 MED)", async ({ page }) => {
+  await logUci(page);
+  const live20 = { ...live, level: "max20" };
+  const old3 = rec(OLD, "2026-09-27T10:00:00.000Z", { level: "max", moves: ["a4a5"] }); // 한(엔진) 차례로 끝났다
+  await seed(page, [live20, old3]);
+  await openGame(page, 1);
+  await expect(status(page)).toContainText("복기 중 · 0/1수");
+  await expect.poll(async () => (await uci(page)).filter((l) => /^> go movetime (3000|20000)$/.test(l)), { timeout: 30_000 })
+    .toEqual(["> go movetime 3000"]);
+});
+
 // 최종 리뷰 A·B I1: 엔진이 쉬고 있으면 판이 바뀌자마자 진행 중인 판의 탐색이 시작된다 — 그 첫 탐색부터 Hash 64 · MultiPV 5.
 const lastBefore = (log, index, is) => log.slice(0, index).filter(is).at(-1);
 test("쉬고 있는 저장된 판 복기(1분, 멈춤 뒤)를 떠나도 진행 중인 판의 첫 탐색은 Hash 64 · MultiPV 5 다", async ({ page }) => {

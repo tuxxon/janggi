@@ -115,6 +115,13 @@ describe("undo", () => {
     expect(state.moves).toEqual(["a4a5", "a7a6"]);
   });
 
+  // 최강 · 3초 ↔ 최강 · 20초를 대국 중에 바꾼 뒤 무르기(리뷰 HIGH, 2026-09-30): 두는 이처럼 지금 난이도를 유지한다.
+  it("keeps the level chosen during the game, like the controllers", () => {
+    let state = game.play(game.newGame({ ...options, level: "max" }), [54, 45]);
+    state = game.play({ ...state, level: "max20" }, [27, 36]);
+    expect(state.hist.map((h) => h.level)).toEqual(["max", "max20"]);          // 무르기가 돌아갈 0수째는 바꾸기 전 난이도
+    expect(game.undo(state)).toMatchObject({ moves: [], level: "max20" });
+  });
   it("can undo a human move while an engine reply is pending", () => {
     const state = game.play(game.newGame(options), [54, 45]);
     expect(game.canUndo(state)).toBe(true);

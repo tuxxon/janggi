@@ -71,8 +71,9 @@ export const canUndo = (state) => undoIndex(state) >= 0;
 export function undo(state) {
   const index = undoIndex(state);
   if (index < 0) throw new Error("무를 수 있는 사람 차례가 없어요.");
-  // 이력 속 국면은 그때의 컨트롤러를 들고 있다 — 대국 중에 바꾼 지금 설정을 유지한다.
-  return { ...state.hist[index], controllers: state.controllers, msg: "무르기 했어요." };
+  // 이력 속 국면은 그때의 컨트롤러·난이도를 들고 있다 — 대국 중에 바꾼 지금 설정을 유지한다
+  // (난이도는 최강 · 3초 ↔ 최강 · 20초만 대국 중에 바뀐다, 개정 2.12).
+  return { ...state.hist[index], controllers: state.controllers, level: state.level, msg: "무르기 했어요." };
 }
 
 // 대국 중에 편의 사람/엔진을 바꾼다(고르는 즉시 적용). 국면·수순은 그대로, c/h 만 받는다.

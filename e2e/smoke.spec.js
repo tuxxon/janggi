@@ -211,6 +211,61 @@ test("대국 중에 최강 · 3초를 20초로 바꾸면 새 게임 없이 다�
   expect((await latestRecord(page)).level).toBe("max20");
 });
 
+// 리뷰(2026-09-30): 엔진이 3초로 생각하는 동안 20초로 바꾸고 무르면, 두는 이처럼 지금 난이도를 유지한다.
+test("엔진이 생각하는 동안 최강 · 20초로 바꾼 뒤 무르기를 해도 20초 그대로다 (리뷰 HIGH)", async ({ page }) => {
+  await logUci(page);
+  await openGame(page);
+  await expect(page.locator('option[value="max"]')).toBeEnabled({ timeout: 30_000 });
+  await page.getByLabel("난이도", { exact: true }).selectOption("max");
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await clickSq(page, 6, 0); await clickSq(page, 5, 0);
+  await expect(clock(page)).toContainText("/3초)", { timeout: 30_000 });
+  await page.getByLabel("난이도", { exact: true }).selectOption("max20");      // 엔진이 3초 생각하는 동안
+  await expect.poll(async () => (await latestRecord(page))?.moves.length, { timeout: 30_000 }).toBe(2);
+  expect((await latestRecord(page)).level).toBe("max20");
+  await page.getByRole("button", { name: "무르기" }).click();
+  await expect.poll(async () => (await latestRecord(page))?.moves.length).toBe(0);
+  expect((await latestRecord(page)).level).toBe("max20");
+  await expect(page.getByLabel("난이도", { exact: true })).toHaveValue("max20");
+  await expect(page.getByTestId("pending")).toHaveCount(0);
+  const mark = (await uci(page)).length;
+  await clickSq(page, 6, 0); await clickSq(page, 5, 0);
+  await expect.poll(async () => (await uci(page)).slice(mark).find((l) => /^> go movetime (3000|20000)$/.test(l)) ?? "", { timeout: 30_000 })
+    .toBe("> go movetime 20000");
+});
+
+// 리뷰(2026-09-30): 진행 중인 판은 복기하는 동안 멈춘다 — 최강이 생각 중이어도 복기 화면엔 시계·지금 두기가 없다.
+test("최강이 생각하는 중에 진행 중인 판을 복기하면 시계와 '지금 두기'가 없다 (리뷰 MED)", async ({ page }) => {
+  await openGame(page);
+  await expect(page.locator('option[value="max20"]')).toBeEnabled({ timeout: 30_000 });
+  await page.getByLabel("난이도", { exact: true }).selectOption("max20");
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await clickSq(page, 6, 0); await clickSq(page, 5, 0);
+  await expect(clock(page)).toContainText("/20초)", { timeout: 30_000 });
+  await page.getByRole("button", { name: "기보" }).click();
+  await page.getByTestId("game-item").nth(0).getByRole("button", { name: "복기" }).click();
+  await expect(page.getByTestId("status")).toContainText("복기 중");
+  await expect(clock(page)).toHaveCount(0);
+  await page.getByRole("button", { name: "대국으로 돌아가기" }).click();
+  await expect(clock(page)).toContainText("/20초)", { timeout: 30_000 });      // 돌아오면 다시 생각한다
+});
+
+// 리뷰(2026-09-30): 새 판을 여는 sync 가 곧바로 최강 탐색을 시작할 수 있다 — 생각 시간은 그 전에 맞춰져야 한다(useAnalysis 효과 순서).
+test("엔진이 먼저 두는 새 최강 · 20초 판은 첫 탐색부터 20초다 (리뷰 MED)", async ({ page }) => {
+  await logUci(page);
+  await openGame(page);
+  await expect(page.locator('option[value="max20"]')).toBeEnabled({ timeout: 30_000 });
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
+  await page.getByLabel("아래 두는 이", { exact: true }).selectOption("engine");  // 지금 판(보통)에서 초 엔진이 한 수 둔다
+  await page.getByLabel("난이도", { exact: true }).selectOption("max20");
+  await expect.poll(async () => (await latestRecord(page))?.moves.length, { timeout: 30_000 }).toBe(1);
+  await expect.poll(async () => (await uci(page)).at(-1) ?? "", { timeout: 30_000 }).toMatch(/^< bestmove/); // 엔진이 쉰다
+  const mark = (await uci(page)).length;
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await expect.poll(async () => (await uci(page)).slice(mark).find((l) => l.startsWith("> go ")) ?? "", { timeout: 30_000 })
+    .toBe("> go movetime 20000");
+});
+
 test("후보 수 보기는 선택한 기물의 도착 칸에 승률을 붙이고 선택 해제 시 지운다", async ({ page }) => {
   await openGame(page);
   await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");

@@ -421,9 +421,10 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     },
     setMaxTime(ms) { maxTime = checkMaxTime(ms); },
     // 지금 두기: 달리는 최강 탐색을 멈추고 그때까지의 최선수를 둔다. 평가 줄이 오기 전이면 첫 정확한 1순위 줄 뒤에 멈춘다 —
-    // 평가 없이 끝난 탐색은 엔진 실패(재시작)로 본다.
-    moveNow() {
-      if (!maxSearch() || active.moveNow) return;
+    // 평가 없이 끝난 탐색은 엔진 실패(재시작)로 본다. since: 버튼이 그려진 탐색의 maxSince — bestmove 직후에 눌린 클릭이
+    // 다음 최강 탐색(엔진끼리 판의 다른 편)을 멈추지 않게.
+    moveNow(since) {
+      if (!maxSearch() || active.started !== since || active.moveNow) return;
       active.moveNow = true;
       if (active.primary) hurry(active);
     },

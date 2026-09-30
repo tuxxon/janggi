@@ -1402,9 +1402,9 @@ describe("max think time and move now (user request 2026-09-30)", () => {
     service.sync("g", [maxTurn(0)]); await service.ready;
     const move = service.bestMove(0);
     engine.emit(exact(14, 25, "b1c3"));
-    service.moveNow();
+    service.moveNow(service.status.maxSince);
     expect(engine.commands.at(-1)).toBe("stop");
-    service.moveNow();                                                          // 두 번 눌러도 stop 은 한 번
+    service.moveNow(service.status.maxSince);                                   // 두 번 눌러도 stop 은 한 번
     expect(engine.commands.filter((c) => c === "stop")).toHaveLength(1);
     engine.emit("bestmove b1c3"); await tick();
     await expect(move).resolves.toEqual([82, 65]);                             // 버리지 않고 그 수를 둔다
@@ -1416,7 +1416,7 @@ describe("max think time and move now (user request 2026-09-30)", () => {
     service.setMaxTime(20000);
     service.sync("g", [maxTurn(0)]); await service.ready;
     const count = engine.commands.length;
-    service.moveNow();
+    service.moveNow(service.status.maxSince);
     expect(engine.commands).toHaveLength(count);
     engine.emit(`info depth 5 multipv 1 score cp 10 lowerbound nodes 100 pv a4a5`); // bound 줄은 평가가 아니다
     expect(engine.commands).toHaveLength(count);
@@ -1429,10 +1429,40 @@ describe("max think time and move now (user request 2026-09-30)", () => {
     const { service, engine } = setup({ mode: "continuous" });
     service.sync("g", [position(0)]); await service.ready;
     engine.emit(exact(10, 5));
-    service.moveNow();                                                          // 0.8초 분석
+    service.moveNow(service.status.deepSince);                                 // 0.8초 분석
     engine.finish(); await tick();
     engine.emit(exact(14, 5));
-    service.moveNow();                                                          // 깊게 보기
+    service.moveNow(service.status.deepSince);                                 // 깊게 보기
     expect(engine.commands).not.toContain("stop");
+  });
+  // 리뷰(2026-09-30): 지금 두기는 그 버튼이 그려진 탐색에만 — bestmove 직후에 눌린 클릭이 다음 최강 탐색(엔진끼리)을 멈추지 않게.
+  it("moveNow only stops the max search it was drawn for", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const { service, engine } = setup();
+    service.setMaxTime(20000);
+    service.sync("g", [maxTurn(0)]);
+    await vi.advanceTimersByTimeAsync(0); await service.ready;
+    const drawn = service.status.maxSince;
+    vi.setSystemTime(2000);
+    engine.finish(); await vi.advanceTimersByTimeAsync(0);
+    service.sync("g", [position(0), maxTurn(1)]); await vi.advanceTimersByTimeAsync(0);   // 다른 편 최강의 다음 탐색
+    expect(service.status.maxSince).toBe(2000);
+    engine.emit(exact(3, 1));
+    service.moveNow(drawn);
+    expect(engine.commands).not.toContain("stop");
+    service.moveNow(service.status.maxSince);
+    expect(engine.commands.at(-1)).toBe("stop");
+  });
+  // 리뷰(2026-09-30) 뮤턴트 생존: 멈춘(버린) 최강 탐색은 시계를 내리고, 달리는 탐색의 생각 시간은 도중에 바꿔도 그 탐색의 것이다.
+  it("status clears maxSince once the max search is cancelled, and keeps the running search's movetime after setMaxTime", async () => {
+    const { service, engine } = setup();
+    service.setMaxTime(20000);
+    service.sync("g", [maxTurn(0)]); await service.ready;
+    service.setMaxTime(3000);
+    service.sync("g", [maxTurn(0)]);                                            // 같은 국면: 탐색은 그대로
+    expect(service.status.maxMovetime).toBe(20000);
+    service.sync("g", [position(0, "c", { max: false })]);                      // 그 편을 사람으로(최강 탐색을 버린다)
+    expect(engine.commands.at(-1)).toBe("stop");
+    expect(service.status).toMatchObject({ maxSince: null, maxMovetime: null });
   });
 });

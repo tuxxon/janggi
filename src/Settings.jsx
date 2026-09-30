@@ -70,7 +70,7 @@ export function SettingsPanel({ seats, nowBottom, pending, level, maxReason, ana
         )}
       </div>
       <p style={{ fontSize: 12, color: "#65584a", margin: "10px 0 0", lineHeight: 1.6 }}>
-        두는 이(사람/엔진)와 분석은 고르는 즉시 바뀌어요. 나라·상차림·난이도는 새 게임을 누르면 적용돼요. 선수는 항상 초나라예요.
+        두는 이(사람/엔진)와 분석은 고르는 즉시 바뀌어요. 나라·상차림·난이도는 새 게임을 누르면 적용돼요(최강 · 3초 ↔ 20초는 바로 바뀌어요). 선수는 항상 초나라예요.
       </p>
     </section>
   );

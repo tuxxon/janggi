@@ -25,7 +25,7 @@
 | 표시 | 판에 좌표(아래 a–i, 왼쪽 1–10). 후보 수·복기 수순·직전 수 줄에 한글 기물 이름("마 g1→f3") |
 | 분석 모드 | 설정의 "분석": 빠르게 0.8초 / 깊게 3초 / **계속**(기본, 보고 있는 국면을 최대 1분 계속 깊게 — 처음엔 20초, 사용자 요청 2026-09-30). 즉시 적용, `janggi.prefs`에 기억. 엔진 스레드 = 코어의 절반(1~8), Hash 64MB(저장된 판 복기의 깊게 보기가 1분 이상일 때만 256MB), 최강 3초·20초. 깊게 보기 중엔 막대에 읽은 초. 저장된 판의 복기는 "깊게 보기"(MultiPV 1 · 20초/1분/5분/무제한, 5절) |
 | 반복수와 엔진 | 엔진도 카카오식 반복수를 안다: ini 변형 `janggikakao`(janggicasual + moveRepetitionIllegal) + 마지막 쉬기 이후 수순을 보냄. 예전엔 반복을 무승부로 읽어 지는 수를 권했다(사용자 보고) |
-| 테스트 | 단위 293개 · Playwright 50개(Chromium + WebKit 스모크) — 전부 초록(2026-09-30, 최강 · 20초 뒤) |
+| 테스트 | 단위 296개 · Playwright 54개(Chromium + WebKit 스모크) — 전부 초록(2026-09-30, 최강 · 20초와 그 리뷰 수정 뒤) |
 
 ## 2. 실행과 테스트
 
@@ -47,12 +47,12 @@ npm run build                        # dist/ (GitHub Pages 용, base /janggi/)
 ```
 src/engine.js          원본 규칙·탐색(Janggi.jsx 에서 그대로 떼어냄. export 목록만 추가: order, search)
 src/notation.js        칸·수·FEN, describeMove("마 g1→f3")
-src/game.js            순수 상태 기계: newGame{controllers, level, setups, bottom, repetition}, play, undo(지금 컨트롤러 유지),
+src/game.js            순수 상태 기계: newGame{controllers, level, setups, bottom, repetition}, play, undo(지금 컨트롤러·난이도 유지), LEVELS·isMaxLevel(max·max20),
                        setControllers, legalMoves(반복수 반영), 전이(외통수/자동 쉬기/장군)
 src/repetition.js      반복수 forbiddenMove(state) — 막힐 수 있는 수는 "직전 내 수를 되돌리는 수" 하나뿐
 src/record.js          기보 v1(+bottom, +repetition), replay, 검증(모르는 키 제거, 수순 5000 상한은 storage 가져오기에서)
 src/storage.js         localStorage: 판마다 키 하나 + 목록. list/load/put/records, save{touch:false}=복기 판 저장(순서 유지)
-src/seats.js           자리 설정: seatsOf/chooseNation(연동)/nextGame/pendingOf/whoApplied/withWho(끝난 판은 안 건드림)
+src/seats.js           자리 설정: seatsOf/chooseNation(연동)/nextGame/pendingOf/whoApplied/withWho(끝난 판은 안 건드림)/withLevel(최강끼리만 지금 판에)
 src/winrate.js         cp→승률(lichess 체스 곡선, 추정치), moveDelta, grade, moverWin
 src/review.js          복기 순수 계산(reviewRows, chartPoints, resultText)
 src/Janggi.jsx         화면(판 SVG·드래그·애니메이션은 원본). 왼쪽 판 열 + 오른쪽 패널(설정 또는 복기)
@@ -64,9 +64,10 @@ src/engineMove.js      원본 bestMove 루트 루프에서 막힌 수 하나를 
 src/analysis/service.js      UCI 서비스(주입된 엔진): 국면 대기열(빠짐없이 순서대로), 최강 우선, 초점 분석, 신경망 교체, 재시작 1회,
                              분석 모드(setMode)와 깊게 보기(deepen(ply, cap), 선점·점진 결과). cap null = 진행 중인 판과 그 복기
                              (MultiPV 5 · 1분), cap 이 있으면 저장된 판 복기의 2단계(MultiPV 1 · 20초/1분/5분/무제한, 멈춤 haltDeepen,
-                             무제한은 isready 탐침, 1분 이상 Hash 256). 판이 바뀌면 sync 가 첫 탐색 전에 상한을 푼다
+                             무제한은 isready 탐침, 1분 이상 Hash 256). 판이 바뀌면 sync 가 첫 탐색 전에 상한을 푼다. 최강 생각 시간 setMaxTime(3000·20000,
+                             다음 최강 탐색부터), 지금 두기 moveNow(since)(stop 하되 결과를 버리지 않음), status.deepSince·maxSince·maxMovetime
 src/analysis/gameAnalysis.js 판 ↔ 서비스 연결(analysisPositions{restrictions}, cacheEvaluation 병합, engineTurn)
-src/analysis/useAnalysis.js  React 훅(판별 캐시, known 평가 전달, setMode·deepen(k, deepCap) 효과, haltDeepen)
+src/analysis/useAnalysis.js  React 훅(판별 캐시, known 평가 전달, setMaxTime(sync 보다 먼저)·setMode·deepen(k, deepCap) 효과, haltDeepen, moveNow)
 src/analysis/fsf.js / nnue.js  WASM 로더(threadsFor, Hash 64), 사용자 신경망(크기+SHA-256 전체)
 vendor/coi-serviceworker.js  격리 서비스워커 수정본(MIT) — WebKit 304 처리
 scripts/vendor.mjs     public/ 으로 엔진 파일·SW·라이선스 고지 복사(dev/build 전에 자동)
@@ -80,20 +81,20 @@ e2e/                   smoke / review / settings / analysis .spec.js + helpers.j
 - **승률 표시**: 네 가지 전부. AI 에이전트(2단계)에게는 **대국 중에 승률을 숨긴다.**
 - **신경망**: 기본 평가 + 사용자가 넣기(Drive 는 브라우저 요청을 403 으로 막는다).
 - **최강**: Fairy-Stockfish가 항상 최선수(bestmove). 신경망이 없으면 기본 평가로 두고 그렇게 표시한다. 조용히 약한 엔진으로 바꾸지 않는다.
-- **두는 이(사람/엔진)는 고르는 즉시 적용**. 나라·상차림·난이도는 새 게임부터(알림으로 표시).
+- **두는 이(사람/엔진)는 고르는 즉시 적용**. 나라·상차림·난이도는 새 게임부터(알림으로 표시). 예외: 최강 · 3초 ↔ 최강 · 20초는 즉시(2026-09-30 답).
 - **반복수**: "카카오 장기 규칙을 따르면 돼", "궁과 사는 무한 반복수 가능", "상대방이 한 수 쉬면, 우린 둘 수 있는 거거든".
   - 카카오 공식 문서는 못 찾았다. 그래서 FSF `janggimodern`(카카오 호환)을 줄 단위로 따라갔고, 리뷰어가 6,400국면을 대조해서 차이 0을 확인했다.
   - 사용자 규칙으로 쉬기(내 쉬기·상대 쉬기·자동 쉬기)가 끼면 셈이 끊긴다. 이 부분은 FSF와 다르다.
   - 새 판부터 적용한다(`repetition: true`). 옛 기보는 규칙 없이 재생한다.
 - **분석 깊이**: 계속 깊게 보기 + 코어 여러 개 + 최강 더 깊게 + 설정에서 고르기 — **네 가지 전부**(구현 끝, spec 2.9).
-- **난이도는 새 게임부터**(2026-09-29 답): 대국 중 즉시 바꾸지 않는다. 두는 이와 분석 모드만 즉시.
+- **난이도는 새 게임부터**(2026-09-29 답): 대국 중 즉시 바꾸지 않는다. 두는 이와 분석 모드만 즉시. **예외(2026-09-30 답)**: 최강 · 3초 ↔ 최강 · 20초만 대국 중에도 바로(다음 최강 탐색부터), 다른 난이도가 끼면 새 게임부터. 사용자가 처음엔 난이도가 새 게임부터라서 난이도에 두는 걸 반대했다가, 최강끼리 즉시면 난이도에 둬도 된다고 정했다.
 - **한글 기물 이름**(2026-09-29 답): 후보 수, 복기 수순, 직전 수 평가 줄 모두.
 
 ## 5. 끝난 일 — "더 깊이 보기" (2026-09-29, spec 2.9)
 
 동작의 정본은 spec 7절 "분석 모드 — 더 깊이 보기"다. 여기는 요약과 리뷰 결과만 둔다.
 
-- **분석 모드**: 빠르게 0.8초 / 깊게 3초 / **계속**(기본). 계속은 0.8초 결과 뒤 할 일이 없으면 보고 있는 국면(대국 = 마지막, 복기 = k수째)을 `go movetime 20000`으로 읽는다. 우선순위 최강 > 밀린 국면 > 초점 > 깊게 보기, 최강 차례는 깊게 보지 않는다.
+- **분석 모드**: 빠르게 0.8초 / 깊게 3초 / **계속**(기본). 계속은 0.8초 결과 뒤 할 일이 없으면 보고 있는 국면(대국 = 마지막, 복기 = k수째)을 `go movetime 60000`으로 읽는다(처음엔 20000, 2026-09-30 사용자 요청으로 1분). 우선순위 최강 > 밀린 국면 > 초점 > 깊게 보기, 최강 차례는 깊게 보지 않는다.
 - **점진 결과**: MultiPV 묶음의 마지막 순위 줄이 왔을 때, 1순위가 보여준 결과보다 깊을 때만.
 - **저장 평가 보존**: 마지막 국면은 후보 때문에 항상 다시 읽지만, 기보에 더 깊은 평가(known)가 있으면 평가는 그대로 두고 후보·최선수만 바꾼다. 신경망을 바꾸면 known 을 버린다.
 - **스레드**: 코어의 절반(1~8). `navigator.deviceMemory`가 8GB 미만이면 `max(1, floor(GB/2))`. Hash 64MB. 최강 3000ms·MultiPV 1.
@@ -131,7 +132,7 @@ e2e/                   smoke / review / settings / analysis .spec.js + helpers.j
 - 쉬기 처리는 FSF와 다르다(의도한 것).
 - "깊게"로 바꿔도 지금 보이는 국면은 다시 읽지 않는다(다음 국면부터 3초). 계속으로 바꾸면 바로 깊게 읽는다.
 - 깊게 모드에서 사람이 3초 안에 두면, 최강 차례가 진행 중인 3초 탐색 뒤에서 기다린다(원래는 0.8초). 달리는 일반 탐색은 선점하지 않는다.
-- 감시 타이머는 `stop`을 보낼 때 다시 맞추지 않는다. 깊게 보기를 멈춘 뒤 엔진이 응답하지 않으면 최강 차례가 15초가 아니라 최대 35초 뒤에 실패로 잡힌다(추정, 재현 안 함).
+- 감시 타이머는 `stop`을 보낼 때 다시 맞추지 않는다. 깊게 보기를 멈춘 뒤 엔진이 응답하지 않으면 최강 차례가 15초가 아니라 최대 75초(1분 + 15초) 뒤에 실패로 잡힌다(추정, 재현 안 함).
 - "계속"은 새로고침하면 상한 기록(capped)이 메모리에만 있어서 같은 국면을 다시 1분 읽는다(보여준 깊이보다 깊을 때만 표시).
 
 ## 7. 일하는 방식 (이 프로젝트에서 합의·확인된 것)
@@ -174,3 +175,5 @@ e2e/                   smoke / review / settings / analysis .spec.js + helpers.j
 | FSF 반복 금지는 쉬기 너머까지 센다(우리 규칙: 쉬기면 다시) | 전체 수순이 아니라 마지막 쉬기 이후만 보낸다(실측: 한이 쉰 뒤 a1a2 를 전체 수순으로 보내면 금지로 본다) |
 | ini 로 정의한 변형은 부모의 NNUE 별칭("janggi")을 잃는다 → 신경망이 조용히 꺼졌다(e2e 가 잡음) | 엔진 안 파일 이름을 `/janggikakao-<name>` 으로 |
 | 스레드가 코어의 절반(이 맥 7)이라 병렬 e2e 워커끼리 CPU를 다퉈 서비스워커 첫 방문 격리가 20초를 넘겼다(평소 실행 4번 중 1번, main 은 0번) | `openIsolated`가 기본으로 코어 2개(엔진 1스레드)로 보이게 하고, 저장된 값이 없으면 "빠르게"를 심는다. 실제 스레드·계속 모드는 `analysis.spec.js`와 WebKit 스모크가 `cores: null`로 본다 |
+| main 빌드(`LEVELS` 에 max20 없음)를 같은 주소(localhost:5173)에서 띄우면 max20 최신 판이 검증에 걸려 `janggi.index` 에 "손상됨"이 기록되고, 이 브랜치로 돌아와도 목록에 손상됨으로 남는다(기록 자체는 멀쩡, 전체 내보내기엔 들어간다 — 리뷰 LOW 2026-09-30) | `max-think-time` 을 main 에 합치기 전엔 같은 주소에서 main 을 띄우지 않는다 |
+| `toHaveCount(0)` 은 재시도한다: 3초 최강 탐색 중 "시계 없음"을 단언하면 탐색이 끝나 시계가 저절로 사라질 때까지 기다려 가드를 빼도 통과했다(뮤테이션으로 발견, 2026-09-30) | 없어야 할 것을 단언할 땐 그것이 계속 있을 상황(20초 탐색 중)에서 한다 |
