@@ -4,7 +4,7 @@
 [`docs/superpowers/specs/2026-09-28-janggi-mcp-design.md`](superpowers/specs/2026-09-28-janggi-mcp-design.md) (개정 2.13).
 
 - 저장소: `~/workspace/janggi` · GitHub [tuxxon/janggi](https://github.com/tuxxon/janggi) (public)
-- 기준: 2026-09-30, 브랜치 `move-deep-look` (이 문서를 고친 커밋) — 마우스 미리 보기·오른쪽 클릭 30초 깊게 보기(개정 2.13)와 그 리뷰 수정. main 병합은 사용자 확인 뒤.
+- 기준: 2026-09-30, `main` (이 문서를 고친 커밋) — 마우스 미리 보기·오른쪽 클릭 30초 깊게 보기(개정 2.13) `e0165ec`와 그 리뷰 수정 `fa23bbd` 를 main 에 병합했다(fast-forward, 사용자 확인). 브랜치는 main 하나.
 - 2026-09-30 main 에 병합(fast-forward, 사용자 확인): **복기 깊게 보기**(저장된 판 복기 전용, 개정 2.10 — 브랜치 `review-deep-look`)와 그 위의 사용자 요청 세 개 — 막대에 깊게 보기 읽은 초 `3018f1b`, 계속 모드 상한 20초 → 1분 `2369802`, **최강 · 20초**와 지금 두기 `d421ccb`·리뷰 수정 `7e06533`(개정 2.11·2.12). 병합한 브랜치와 원격 `wip/deeper-analysis`(빨간 테스트 초안 `460d55c`)는 지웠다 — 브랜치는 main 하나.
 - **Flutter 앱 "장기9단"**: `~/workspace/janggi-flutter`(비공개). 이어서 할 때는 그 저장소의 `docs/HANDOFF-2026-09-29-m0.md` 부터.
 
