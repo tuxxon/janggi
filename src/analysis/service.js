@@ -34,7 +34,7 @@ export const MODES = ["fast", "deep", "continuous"];
 // (반복 금지보다 n번 반복 무승부가 먼저 걸리지 않게). 수순은 gameAnalysis.enginePositions 가 붙인다.
 export const KAKAO = { name: "janggikakao", path: "/janggi-kakao.ini",
   ini: "[janggikakao:janggicasual]\nmoveRepetitionIllegal = true\nnFoldRule = 4\n" };
-export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 60000, max: 3000, focus: 500 };
+export const MOVETIME = { fast: 800, deep: 3000, continuous: 800, deepen: 60000, max: 3000, max20: 20000, focus: 500 };
 // 저장된 판 복기의 2단계 깊게 보기 상한(개정 2.10). 무제한은 Infinity(go infinite). 1분 이상이면 Hash 256.
 export const DEEP_CAPS = [20000, 60000, 300000, Infinity];
 const LONG_CAP = 60000, LONG_HASH = 256;
@@ -44,6 +44,10 @@ const ENGINE_MAX_DEPTH = 245;
 function checkMode(mode) {
   if (!MODES.includes(mode)) throw new Error(`알 수 없는 분석 모드예요: ${mode}`);
   return mode;
+}
+function checkMaxTime(ms) {
+  if (ms !== MOVETIME.max && ms !== MOVETIME.max20) throw new Error(`알 수 없는 최강 생각 시간이에요: ${ms}`);
+  return ms;
 }
 function checkCap(cap) {
   if (cap !== null && !DEEP_CAPS.includes(cap)) throw new Error(`알 수 없는 깊게 보기 상한이에요: ${cap}`);
@@ -63,13 +67,18 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   let engine, listener, gameId, entries = [], active = null, focus = null, deepenPly = null, deepCap = null, engineHash = null;
   let available = false, disposed = false, failures = 0, generation = 0, timer;
   let network = null, networkChange = null, configuring = false;
+  // maxTime: 최강 탐색의 생각 시간(3초·20초, 사용자 요청 2026-09-30). 바꾸면 다음 최강 탐색부터.
+  let maxTime = MOVETIME.max;
   const waiters = new Set();
-  let status = { state: "loading", pending: 0, nnue: "off", reason: null, deepening: false, deepSince: null };
+  let status = { state: "loading", pending: 0, nnue: "off", reason: null, deepening: false, deepSince: null, maxSince: null, maxMovetime: null };
   // deepSince: 달리는 깊게 보기가 시작된 시각(ms) — 막대가 읽은 초를 센다. 선점 뒤 다시 시작하면 새로 센다.
+  // maxSince·maxMovetime: 달리는 최강 탐색이 시작된 시각과 그 생각 시간 — 상태 줄이 "(7/20초)"를 센다.
+  const maxSearch = () => !!(active?.entry.max && !active.focus && !active.deepen && !active.cancelled);
   function publish() {
-    const deepening = !!(active?.deepen && !active.cancelled);
+    const deepening = !!(active?.deepen && !active.cancelled), thinking = maxSearch();
     status = { ...status, pending: entries.filter((e) => !e.result && !e.error).length,
-      deepening, deepSince: deepening ? active.started : null };
+      deepening, deepSince: deepening ? active.started : null,
+      maxSince: thinking ? active.started : null, maxMovetime: thinking ? active.movetime : null };
     if (!disposed) onStatus(status);
   }
   const send = (command) => engine.postMessage(command);
@@ -114,6 +123,12 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     }
   }
   const stopDeepening = () => { if (active?.deepen) { stop(); publish(); } };
+  // 지금 두기: stop 을 보내되 결과는 버리지 않는다(stop() 은 cancelled 로 버린다) — 엔진이 그때까지의 최선수를 bestmove 로 준다.
+  function hurry(job) {
+    if (job.stopSent) return;
+    job.stopSent = true;
+    try { send("stop"); } catch (error) { void fail(error); }
+  }
   const deepenTarget = () => {
     const entry = deepenPly === null ? entries.at(-1) : entries.find((e) => e.ply === deepenPly);
     // 최강 차례는 깊게 보지 않는다(그 탐색이 곧 엔진의 수다). 1차 분석이 끝난 국면만. 끝난 국면(mate 0, 둘 수 없음)은
@@ -194,7 +209,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     // 2단계(cap): 저장된 판 복기의 깊게 보기. 1단계 후보는 그대로 두고 1순위만 그 상한까지 MultiPV 1 로 읽는다. 1단계 후보가
     // 없는 국면(저장된 평가만 있는 cached)은 먼저 보통 분석(1단계, MultiPV 5)을 한 번 돈다 — 목록 다섯 개(Task 1 리뷰).
     const pass = entry ?? (target && deepCap !== null && !target.first ? target : null);
-    const job = pass ? { entry: pass, movetime: pass.max ? MOVETIME.max : MOVETIME[mode] }
+    const job = pass ? { entry: pass, movetime: pass.max ? maxTime : MOVETIME[mode] }
       : focus ? { entry: focus.entry, focus, movetime: MOVETIME.focus }
       : { entry: target, deepen: true, movetime: deepCap ?? MOVETIME.deepen, ...(deepCap !== null ? { cap: deepCap } : {}) };
     active = { ...job, gameId, mode, lines: new Map(), cancelled: false, started: Date.now() };
@@ -261,6 +276,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       if (parsed.rank === 1 && !parsed.bound) {
         active.primary = parsed; // 평가(점수·깊이)는 가장 최근의 정확한 1순위 줄
         if (active.cap !== undefined && !active.cancelled) countStable(active.entry, parsed);
+        if (active.moveNow) hurry(active); // 평가 줄을 기다리던 지금 두기
       }
     }
     // 깊게 보기는 점진 결과: 묶음의 마지막 순위가 왔을 때, 1순위가 지금 보여준 결과보다 깊을 때만 보낸다
@@ -402,6 +418,14 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       if (capChanged) for (const entry of entries) entry.capped = false;
       if (capChanged || active?.entry !== deepenTarget()) stopDeepening();
       pump();
+    },
+    setMaxTime(ms) { maxTime = checkMaxTime(ms); },
+    // 지금 두기: 달리는 최강 탐색을 멈추고 그때까지의 최선수를 둔다. 평가 줄이 오기 전이면 첫 정확한 1순위 줄 뒤에 멈춘다 —
+    // 평가 없이 끝난 탐색은 엔진 실패(재시작)로 본다.
+    moveNow() {
+      if (!maxSearch() || active.moveNow) return;
+      active.moveNow = true;
+      if (active.primary) hurry(active);
     },
     // 멈춤: 달리는 깊게 보기를 멈추고 그 국면을 다 읽은 것으로 친다(결과는 남는다, 상한을 바꾸면 다시 본다).
     haltDeepen() {

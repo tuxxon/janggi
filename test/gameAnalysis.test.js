@@ -62,6 +62,19 @@ describe("game analysis integration", () => {
     service.bestMove.mockResolvedValue(null);
     expect(await integration.engineTurn(g, service)).toBeNull();
   });
+  // 최강 · 20초(사용자 요청 2026-09-30): 최강과 같은 길이지만 생각 시간이 20초다.
+  it("max20 is a max level: marks the live engine turn, moves through the service and records max-movetime=20000", async () => {
+    const g = play(initial({ level: "max20" }), [54, 45]);
+    expect(integration.analysisPositions(g).map((p) => p.max)).toEqual([false, true]);
+    expect(integration.maxTimeOf("max20")).toBe(20000);
+    expect(integration.maxTimeOf("max")).toBe(3000);
+    const r = { gameId: g.id, fen: integration.analysisPositions(g)[1].fen, ply: 1, cp: 0, win: 50, depth: 20, candidates: [], movetime: 20000 };
+    expect(integration.cacheEvaluation(integration.syncAnalysisCache(null, g), g, r).analysis.engine).toContain(" max-movetime=20000 ");
+    const turn = initial({ level: "max20", controllers: { c: "engine", h: "human" } });
+    const service = { bestMove: vi.fn().mockResolvedValue([54, 45]) };
+    expect((await integration.engineTurn(turn, service)).moves).toEqual(["a4a5"]);
+    expect(service.bestMove).toHaveBeenCalledExactlyOnceWith(0);
+  });
   it("keeps levels 2–4 on the original engine path", async () => {
     expect(integration.engineTurn).toBeTypeOf("function");
     const spy = vi.spyOn(original, "bestMove").mockReturnValue([54, 45]);

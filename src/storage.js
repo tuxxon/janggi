@@ -1,4 +1,4 @@
-import { newGame } from "./game.js";
+import { newGame, LEVELS } from "./game.js";
 import { toRecord, replay, validId } from "./record.js";
 
 export const SAVE_ERROR = "기보 저장 실패 — 내보내기로 백업하세요";
@@ -95,7 +95,7 @@ export function createStore({ storage = () => globalThis.localStorage, now = () 
     return { state, error, corrupted };
   }
   // 목록·내보내기에 넘기기 전에 화면이 쓰는 필드의 모양을 확인한다(잘못된 기록 하나가 화면 전체를 죽이지 않게).
-  const WHO = ["human", "engine"], LEVELS = [2, 3, 4, "max"];
+  const WHO = ["human", "engine"];
   function readRecord(entry) {
     const record = JSON.parse(backend().getItem(PREFIX + entry.id));
     if (!record || record.id !== entry.id || !Array.isArray(record.moves) || typeof record.createdAt !== "string"

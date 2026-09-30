@@ -1,18 +1,18 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { inCheck, kingIdx } from "./engine.js";
-import { play as applyMove, undo as undoMove, canUndo, legalMoves } from "./game.js";
+import { play as applyMove, undo as undoMove, canUndo, legalMoves, isMaxLevel } from "./game.js";
 import { createStore, exportRecords, importRecords, SAVE_ERROR } from "./storage.js";
 import { replay, toRecord } from "./record.js";
 import { reviewRows } from "./review.js";
 import { GameList, ReviewPanel } from "./Review.jsx";
 import { SettingsPanel } from "./Settings.jsx";
 import { loadPrefs, savePrefs, capOf } from "./prefs.js";
-import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, withWho } from "./seats.js";
+import { bottomOf, seatsOf, chooseNation, nextGame, pendingOf, withWho, withLevel } from "./seats.js";
 import { forbiddenMove } from "./repetition.js";
 import { toFen, moveToUci, describeMove } from "./notation.js";
 import { moveDelta, grade, moverWin } from "./winrate.js";
 import { useAnalysis } from "./analysis/useAnalysis.js";
-import { engineTurn } from "./analysis/gameAnalysis.js";
+import { engineTurn, maxTimeOf } from "./analysis/gameAnalysis.js";
 import { HintLabels } from "./analysis/HintLabels.jsx";
 
 // ===== React 화면 =====
@@ -50,6 +50,22 @@ function Piece({ p, x, y, selected, lifted }) {
 
 // ---- 승률 분석 (Fairy-Stockfish WASM) ----
 // stable: 저장된 판 복기의 2단계 결과면 "같은 수 N깊이째"의 N(개정 2.10), 아니면 null.
+// 최강이 생각하는 동안 경과 초와 "지금 두기"(사용자 요청 2026-09-30). since·movetime: 서비스가 그 탐색을 시작한 시각과 생각 시간.
+export function MaxClock({ since, movetime, onMoveNow }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [since]);
+  const secs = Math.min(movetime / 1000, Math.max(0, Math.floor((Date.now() - since) / 1000)));
+  return (
+    <span data-testid="max-clock" style={{ fontSize: 14, color: "#65584a", marginLeft: 6 }}>
+      {`(${secs}/${movetime / 1000}초)`}{" "}
+      <button onClick={onMoveNow} style={{ fontSize: 12, padding: "1px 8px", borderRadius: 6, border: "1px solid #8a7a66", background: "#f3ecdd", cursor: "pointer" }}>지금 두기</button>
+    </span>
+  );
+}
+
 export function WinBar({ a, status, fen, stable = null }) {
   const w = a?.win ?? null;
   // 깊게 보기가 달리는 동안 1초마다 다시 그려 읽은 초를 센다(사용자 요청 2026-09-30).
@@ -127,7 +143,8 @@ export default function Janggi() {
   // null(지금 "계속" 그대로). 상한과 Hash 256 은 서비스 전체 값이라, 그 복기를 떠나면 null 로 되돌려야 한다.
   const savedReview = !!review && review.record.id !== g.id;
   const deepCap = savedReview ? capOf(prefs.reviewDeep) : null;
-  const analysis = useAnalysis(review ? review.state : g, { mode: prefs.analysis, deepen: review ? review.k : null, deepCap });
+  const analysis = useAnalysis(review ? review.state : g, { mode: prefs.analysis, deepen: review ? review.k : null, deepCap,
+    maxTime: maxTimeOf(g.level) });
   const { serviceRef } = analysis;
 
   // 판에 그릴 국면: 진행 중인 판, 또는 복기 중인 판의 k수째.
@@ -154,8 +171,8 @@ export default function Janggi() {
         if (alive && gRef.current === g) setMoveError({ game: g, message: error.message });
       }
     };
-    const t = g.level === "max" ? null : setTimeout(run, 420);
-    if (g.level === "max") void run();
+    const t = isMaxLevel(g.level) ? null : setTimeout(run, 420);
+    if (isMaxLevel(g.level)) void run();
     return () => { alive = false; clearTimeout(t); };
   }, [g, thinking, serviceRef, reviewing]);
 
@@ -320,6 +337,11 @@ export default function Janggi() {
     setSel(null); setDrag(null);
     setG((prev) => withWho(prev, seat, who)); // 끝난 판이면 다음 판 설정만 바뀐다
   }
+  // 난이도는 새 게임부터. 최강 · 3초 ↔ 최강 · 20초만 지금 판에도 바로(다음 최강 탐색부터, 사용자 요청 2026-09-30).
+  function changeLevel(next) {
+    setLevel(next);
+    setG((prev) => withLevel(prev, next));
+  }
   // 나라(연동)·상차림은 다음 판 설정만 바꾼다.
   const changeNation = (seat, nation) => setSeats((s) => chooseNation(s, seat, nation));
   const changeSetup = (seat, setup) => setSeats((s) => ({ ...s, [seat]: { ...s[seat], setup } }));
@@ -338,7 +360,7 @@ export default function Janggi() {
 
   const oneHuman = Object.values(g.controllers).filter((c) => c === "human").length === 1;
   const engineError = moveError?.game === g ? moveError.message
-    : thinking && g.level === "max" && analysis.status.state === "disabled" ? analysis.status.reason : null;
+    : thinking && isMaxLevel(g.level) && analysis.status.state === "disabled" ? analysis.status.reason : null;
   const rows = review ? reviewRows(review.record, review.positions, analysis.evals) : null;
   const status = review ? `복기 중 · ${review.k}/${review.record.moves.length}수`
     : g.over ? g.msg : engineError || (thinking ? "엔진이 생각하는 중…"
@@ -375,7 +397,8 @@ export default function Janggi() {
       <main style={{ flex: "1 1 560px", maxWidth: 560, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <h1 style={{ fontSize: 32, fontWeight: 900, margin: 0, letterSpacing: "0.05em" }}>장기</h1>
-          <div data-testid="status" style={{ fontSize: 16, color: !review && (g.over || engineError || status.includes("장군")) ? COL.h : "#261d15", fontWeight: !review && g.over ? 700 : 400 }}>{status}</div>
+          <div data-testid="status" style={{ fontSize: 16, color: !review && (g.over || engineError || status.includes("장군")) ? COL.h : "#261d15", fontWeight: !review && g.over ? 700 : 400 }}>{status}
+            {analysis.status.maxSince != null && <MaxClock since={analysis.status.maxSince} movetime={analysis.status.maxMovetime} onMoveNow={analysis.moveNow} />}</div>
         </div>
         {lastEvaluation && <div data-testid="last-evaluation" style={{ fontSize: 13, marginBottom: 4 }}>{lastEvaluation}</div>}
         {notice && <div data-testid="notice" role="status" style={{ fontSize: 13, color: COL.h, marginBottom: 4 }}>{notice}</div>}
@@ -489,7 +512,7 @@ export default function Janggi() {
         <SettingsPanel seats={seats} nowBottom={bottomOf(g)} pending={pendingOf(seats, level, g)} level={level}
           maxReason={analysis.status.state !== "ready" ? analysis.status.reason || "엔진 준비 중…" : null}
           analysisMode={prefs.analysis} onAnalysis={changeAnalysis}
-          onNation={changeNation} onWho={changeWho} onSetup={changeSetup} onLevel={setLevel} />
+          onNation={changeNation} onWho={changeWho} onSetup={changeSetup} onLevel={changeLevel} />
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12 }}>
           <label style={{ ...btn, fontSize: 13, cursor: networkBusy ? "wait" : "pointer" }}>
             신경망 넣기

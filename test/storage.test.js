@@ -125,6 +125,12 @@ describe("storage for review (M3)", () => {
       { id: ID, createdAt: DATE, controllers: { c: "human", h: "engine" }, level: 3, moves: 2, result: null, corrupted: false },
     ]);
   });
+  it("lists a 20-second max game (max20) as a readable record", () => {
+    const { fake, store } = twoGames();
+    const saved = JSON.parse(fake.getItem(`janggi.game.${ID}`));
+    fake.setItem(`janggi.game.${ID}`, JSON.stringify({ ...saved, level: "max20" }));
+    expect(store.list().find((e) => e.id === ID)).toMatchObject({ level: "max20", corrupted: false });
+  });
   it("marks an unreadable record in the list instead of throwing", () => {
     const { fake, store } = twoGames();
     fake.setItem(`janggi.game.${ID}`, "{not json");

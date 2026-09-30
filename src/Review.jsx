@@ -4,7 +4,7 @@ import { REVIEW_DEEP } from "./prefs.js";
 
 const COL = { c: "#1b4a8c", h: "#ae2219" };
 const WHO = { human: "사람", engine: "엔진" };
-const LEVEL = { 2: "쉬움", 3: "보통", 4: "어려움", max: "최강" };
+const LEVEL = { 2: "쉬움", 3: "보통", 4: "어려움", max: "최강 · 3초", max20: "최강 · 20초" };
 const when = (iso) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });

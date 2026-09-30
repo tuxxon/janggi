@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openIsolated, clickBoard } from "./helpers.js";
+import { openIsolated, clickBoard, logUci, uci } from "./helpers.js";
 import { readFileSync, readdirSync } from "node:fs";
 
 const OLD = "2026-09-27T10-00-00-000", LIVE = "2026-09-28T10-00-00-000";
@@ -255,23 +255,6 @@ test("복기 훈수에서도 그 시점에 반복수로 막힌 수는 도착 칸
 });
 
 // ---- 복기 깊게 보기 (개정 2.10: 저장된 판 복기 전용) ----
-// UCI 기록: 앱이 엔진에 보낸 명령("> ...")과 엔진의 uciok·readyok·bestmove 줄("< ...")을 window.__uci 에 쌓는다.
-// stockfish.js 의 전역 var Stockfish 대입을 가로채 엔진의 postMessage 를 감싼다(pthread 워커는 건드리지 않는다).
-async function logUci(page) {
-  await page.addInitScript(() => {
-    const log = (window.__uci = []);
-    let wrapped;
-    Object.defineProperty(window, "Stockfish", { configurable: true, get: () => wrapped, set(real) {
-      wrapped = (options) => Promise.resolve().then(() => real(options)).then((engine) => {
-        const post = engine.postMessage.bind(engine);
-        engine.postMessage = (command) => { log.push(`> ${command}`); return post(command); };
-        engine.addMessageListener((line) => { if (/^(uciok|readyok|bestmove)\b/.test(line)) log.push(`< ${line}`); });
-        return engine;
-      });
-    } });
-  });
-}
-const uci = (page) => page.evaluate(() => window.__uci);
 const bar = (page) => page.getByTestId("winbar");
 const capSelect = (page) => page.getByLabel("깊게 보기", { exact: true });
 const openGame = async (page, nth) => {                   // 복기에서 돌아오면 목록이 열린 채다 → 닫혀 있을 때만 연다

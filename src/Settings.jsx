@@ -2,6 +2,7 @@
 // 두는 이와 분석은 고르는 즉시 적용되고, 나라·상차림·난이도는 새 게임부터 적용된다(바뀐 것은 목록으로 알려 준다).
 import { SETUPS } from "./engine.js";
 import { nationAt } from "./seats.js";
+import { isMaxLevel } from "./game.js";
 
 const COL = { c: "#1b4a8c", h: "#ae2219" };
 const NATION = { c: "초나라", h: "한나라" };
@@ -44,11 +45,12 @@ export function SettingsPanel({ seats, nowBottom, pending, level, maxReason, ana
         <Seat key={seat} seat={seat} seats={seats} nowBottom={nowBottom} onNation={onNation} onWho={onWho} onSetup={onSetup} />
       ))}
       <label style={{ ...lab, marginTop: 10 }}>난이도(엔진)
-        <select aria-label="난이도" style={selStyle} value={level} onChange={(e) => onLevel(e.target.value === "max" ? "max" : +e.target.value)}>
+        <select aria-label="난이도" style={selStyle} value={level} onChange={(e) => onLevel(isMaxLevel(e.target.value) ? e.target.value : +e.target.value)}>
           <option value={2}>쉬움</option>
           <option value={3}>보통</option>
           <option value={4}>어려움</option>
-          <option value="max" disabled={!!maxReason}>최강</option>
+          <option value="max" disabled={!!maxReason}>최강 · 3초</option>
+          <option value="max20" disabled={!!maxReason}>최강 · 20초</option>
         </select>
         {maxReason && <span>최강: {maxReason}</span>}
       </label>

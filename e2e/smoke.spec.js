@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openIsolated, clickBoard } from "./helpers.js";
+import { openIsolated, clickBoard, logUci, uci } from "./helpers.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { NNUE } from "../src/analysis/fsf.js";
@@ -155,6 +155,60 @@ test("최강은 엔진 차례에 합법 수를 두고 그 탐색을 기보 분�
   await expect.poll(async () => (await latestRecord(page))?.analysis?.evals.map((e) => e?.ply), { timeout: 30_000 }).toEqual([0, 1, 2]);
   expect((await latestRecord(page)).analysis.engine).toContain("max-movetime=3000");
   await expect(page.getByText("내 차례예요 · 초(파랑)", { exact: true })).toBeVisible();
+});
+
+// 최강 · 20초(사용자 요청 2026-09-30): 엔진 차례에 20초를 읽고, 생각하는 동안 초를 세며, "지금 두기"는 그때까지의 최선수를 둔다.
+const goes = async (page) => (await uci(page)).filter((c) => c.startsWith("> go "));
+const clock = (page) => page.getByTestId("max-clock");
+test("최강 · 20초: 엔진 차례에 20초를 읽으며 초를 세고, '지금 두기'로 그때까지의 최선수를 바로 둔다 (사용자 요청)", async ({ page }) => {
+  await logUci(page);
+  await openGame(page);
+  await expect(page.locator('option[value="max20"]')).toBeEnabled({ timeout: 30_000 });
+  await page.getByLabel("난이도", { exact: true }).selectOption("max20");
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await clickSq(page, 6, 0); await clickSq(page, 5, 0);
+  await expect(clock(page)).toContainText("/20초)", { timeout: 30_000 });
+  expect((await goes(page)).at(-1)).toBe("> go movetime 20000");
+  const secs = async () => Number(/\((\d+)\/20초\)/.exec(await clock(page).textContent())?.[1] ?? NaN);
+  const s0 = await secs();
+  expect(s0).toBeGreaterThanOrEqual(0);
+  await expect.poll(secs, { timeout: 5_000 }).toBeGreaterThan(s0);            // 화면에서 실제로 올라간다
+  await clock(page).getByRole("button", { name: "지금 두기" }).click();
+  // 누르지 않으면 20초를 다 채운다: 5초 안에 두면 지금 두기가 둔 것이다.
+  await expect.poll(async () => (await latestRecord(page))?.moves.length, { timeout: 5_000 }).toBe(2);
+  const log = await uci(page), go = log.lastIndexOf("> go movetime 20000");
+  const stop = log.indexOf("> stop", go), best = log.findIndex((l, i) => i > go && l.startsWith("< bestmove"));
+  expect(stop).toBeGreaterThan(go);
+  expect(best).toBeGreaterThan(stop);                                            // 멈춘 뒤의 bestmove 가 그 수다
+  await expect(clock(page)).toHaveCount(0);
+  const saved = await latestRecord(page);
+  expect(saved.level).toBe("max20");
+  expect(replay(saved).state.turn).toBe("c");
+  await expect.poll(async () => (await latestRecord(page))?.analysis?.engine ?? "", { timeout: 30_000 }).toContain("max-movetime=20000");
+});
+
+test("대국 중에 최강 · 3초를 20초로 바꾸면 새 게임 없이 다음 엔진 차례부터 20초를 읽고, 다른 난이도는 새 게임부터다 (사용자 요청)", async ({ page }) => {
+  await logUci(page);
+  await openGame(page);
+  await expect(page.locator('option[value="max"]')).toBeEnabled({ timeout: 30_000 });
+  await page.getByLabel("난이도", { exact: true }).selectOption("max");
+  await page.getByRole("button", { name: "새 게임" }).click();
+  await clickSq(page, 6, 0); await clickSq(page, 5, 0);
+  await expect.poll(async () => (await latestRecord(page))?.moves.length, { timeout: 30_000 }).toBe(2);
+  expect(await goes(page)).toContain("> go movetime 3000");
+  expect(await goes(page)).not.toContain("> go movetime 20000");
+  await page.getByLabel("난이도", { exact: true }).selectOption("max20");
+  await expect(page.getByTestId("pending")).toHaveCount(0);                     // "새 게임부터 적용: 난이도"가 없다
+  await expect.poll(async () => (await latestRecord(page))?.level).toBe("max20"); // 지금 판에 바로
+  const mark = (await uci(page)).length;
+  await clickSq(page, 6, 2); await clickSq(page, 5, 2);                          // 초 c4 졸 → c5
+  await expect.poll(async () => (await uci(page)).slice(mark).includes("> go movetime 20000"), { timeout: 30_000 }).toBe(true);
+  await expect(clock(page)).toContainText("/20초)");
+  await clock(page).getByRole("button", { name: "지금 두기" }).click();
+  await expect.poll(async () => (await latestRecord(page))?.moves.length, { timeout: 5_000 }).toBe(4);
+  await page.getByLabel("난이도", { exact: true }).selectOption("3");
+  await expect(page.getByTestId("pending")).toContainText("난이도");            // 최강이 아닌 난이도가 끼면 새 게임부터
+  expect((await latestRecord(page)).level).toBe("max20");
 });
 
 test("후보 수 보기는 선택한 기물의 도착 칸에 승률을 붙이고 선택 해제 시 지운다", async ({ page }) => {

@@ -1,7 +1,7 @@
 // Glue between canonical game history, the UCI service and persisted evaluations.
 import { toFen, moveToUci, sqName } from "../notation.js";
 import { bestMove, inCheck, kingIdx } from "../engine.js";
-import { play, legalMoves } from "../game.js";
+import { play, legalMoves, isMaxLevel } from "../game.js";
 import { forbiddenMove } from "../repetition.js";
 import { bestMoveExcluding } from "../engineMove.js";
 import { MOVETIME, KAKAO } from "./service.js";
@@ -35,7 +35,7 @@ export const analysisPositions = (game, { restrictions = false } = {}) => {
   return states.map((state, ply) => {
     const searchmoves = restrictions ? restriction(state) : undefined;
     return { ply, fen: toFen(state.b, state.turn), turn: state.turn,
-      max: ply === game.moves.length && !game.over && game.level === "max" && game.controllers[game.turn] === "engine",
+      max: ply === game.moves.length && !game.over && isMaxLevel(game.level) && game.controllers[game.turn] === "engine",
       ...(searchmoves ? { searchmoves } : {}), ...(commands ? { position: commands[ply] } : {}) };
   });
 };
@@ -56,7 +56,7 @@ export function cacheEvaluation(cache, game, result) {
   cache = syncAnalysisCache(cache, game);
   const mode = result.mode ?? "fast";
   const engine = `fairy-stockfish-nnue.wasm 1.1.12 ${KAKAO.name} nnue=${result.nnue === "on" ? "janggi-9991472750de" : "off"} mode=${mode} ` +
-    `movetime=${MOVETIME[mode]}${mode === "continuous" ? ` deepen-movetime=${MOVETIME.deepen}` : ""} max-movetime=${MOVETIME.max} threads=${result.threads ?? 1}`;
+    `movetime=${MOVETIME[mode]}${mode === "continuous" ? ` deepen-movetime=${MOVETIME.deepen}` : ""} max-movetime=${maxTimeOf(game.level)} threads=${result.threads ?? 1}`;
   // 다른 엔진 설정(신경망 켜고 끔)으로 만든 평가도 버리지 않는다. 버리면 저장된 평가를 건너뛰는(known) 서비스가
   // 그 국면을 다시 채우지 않아 그래프·실수 표시가 영구히 빈다(리뷰 HIGH). engine 은 가장 최근 설정을 적는다.
   const evals = cache.fens.map((_, ply) => cache.analysis?.evals[ply] ?? null);
@@ -67,9 +67,12 @@ export function cacheEvaluation(cache, game, result) {
   return { ...cache, analysis: { engine, evals }, results };
 }
 
+// 최강의 생각 시간(ms): 최강 · 20초만 20초, 나머지는 3초(최강이 아닌 판도 기보의 엔진 문자열에 3초를 적어 왔다).
+export const maxTimeOf = (level) => (level === "max20" ? MOVETIME.max20 : MOVETIME.max);
+
 // Null means the request was invalidated by undo/new game, never a weaker fallback.
 export async function engineTurn(game, service) {
-  if (game.level !== "max") {
+  if (!isMaxLevel(game.level)) {
     // 반복수로 막힌 수가 있으면 그 수를 뺀 루트 탐색(원본과 같은 식), 없으면 원본 bestMove 그대로.
     const blocked = forbiddenMove(game);
     const move = blocked ? bestMoveExcluding(game.b.slice(), game.turn, game.level, blocked) : bestMove(game.b.slice(), game.turn, game.level);

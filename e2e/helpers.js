@@ -30,3 +30,21 @@ export async function clickBoard(page, r, c) {
   }, [r, c]);
   await page.mouse.click(x, y);
 }
+
+// UCI 기록: 앱이 엔진에 보낸 명령("> ...")과 엔진의 uciok·readyok·bestmove 줄("< ...")을 window.__uci 에 쌓는다.
+// stockfish.js 의 전역 var Stockfish 대입을 가로채 엔진의 postMessage 를 감싼다(pthread 워커는 건드리지 않는다).
+export async function logUci(page) {
+  await page.addInitScript(() => {
+    const log = (window.__uci = []);
+    let wrapped;
+    Object.defineProperty(window, "Stockfish", { configurable: true, get: () => wrapped, set(real) {
+      wrapped = (options) => Promise.resolve().then(() => real(options)).then((engine) => {
+        const post = engine.postMessage.bind(engine);
+        engine.postMessage = (command) => { log.push(`> ${command}`); return post(command); };
+        engine.addMessageListener((line) => { if (/^(uciok|readyok|bestmove)\b/.test(line)) log.push(`< ${line}`); });
+        return engine;
+      });
+    } });
+  });
+}
+export const uci = (page) => page.evaluate(() => window.__uci);

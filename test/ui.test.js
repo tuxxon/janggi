@@ -1,8 +1,8 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import Janggi, { WinBar, Candidates } from "../src/Janggi.jsx";
-import { ReviewPanel } from "../src/Review.jsx";
+import Janggi, { WinBar, Candidates, MaxClock } from "../src/Janggi.jsx";
+import { ReviewPanel, GameList } from "../src/Review.jsx";
 import { newGame } from "../src/game.js";
 
 const id = "2026-09-28T14-03-12-345";
@@ -74,6 +74,7 @@ describe("M2 UI rendering", () => {
     vi.stubGlobal("localStorage", fake({ "janggi.index": JSON.stringify([{ id }]), [`janggi.game.${id}`]: JSON.stringify(saved) }));
     const html = render();
     expect(html).toMatch(/<option[^>]*value="max"[^>]*disabled=""/);
+    expect(html).toMatch(/<option[^>]*value="max20"[^>]*disabled=""/);
     expect(html).toContain("교차 출처 격리 안 됨");
     expect(html).not.toContain("엔진이 생각하는 중…");
   });
@@ -100,6 +101,38 @@ describe("board coordinates (user request 2026-09-29)", () => {
     const html = render();
     expect(labels(html, "file").join("")).toBe("ihgfedcba");
     expect(labels(html, "rank")).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+  });
+});
+
+// 최강 · 20초(사용자 요청 2026-09-30): 난이도 목록, 생각하는 동안의 경과 초와 "지금 두기", 기보 목록의 이름.
+describe("max think time (user request 2026-09-30)", () => {
+  it("offers 최강 · 3초 and 최강 · 20초 as difficulties", () => {
+    vi.stubGlobal("localStorage", fake());
+    const select = /<select[^>]*aria-label="난이도"[^>]*>(.*?)<\/select>/.exec(render())[1];
+    expect([...select.matchAll(/<option[^>]*value="(\w+)"[^>]*>([^<]+)</g)].map((m) => [m[1], m[2]]))
+      .toEqual([["2", "쉬움"], ["3", "보통"], ["4", "어려움"], ["max", "최강 · 3초"], ["max20", "최강 · 20초"]]);
+  });
+  it("restores a 최강 · 20초 game with that difficulty selected", () => {
+    const saved = { ...record, level: "max20", controllers: { c: "human", h: "engine" }, moves: [] };
+    vi.stubGlobal("localStorage", fake({ "janggi.index": JSON.stringify([{ id }]), [`janggi.game.${id}`]: JSON.stringify(saved) }));
+    expect(render()).toMatch(/<option value="max20"[^>]*selected=""/);
+  });
+  it("counts the max engine's think time and offers move now", () => {
+    vi.useFakeTimers(); vi.setSystemTime(100_000);
+    try {
+      const clock = (since, movetime) => renderToStaticMarkup(createElement(MaxClock, { since, movetime, onMoveNow() {} }));
+      expect(clock(93_000, 20000)).toContain("(7/20초)");
+      expect(clock(100_000, 3000)).toContain("(0/3초)");
+      expect(clock(70_000, 20000)).toContain("(20/20초)");                  // bestmove 가 늦어도 생각 시간을 넘겨 세지 않는다
+      expect(clock(93_000, 20000)).toMatch(/<button[^>]*>지금 두기<\/button>/);
+    } finally { vi.useRealTimers(); }
+  });
+  it("names both max levels in the game list", () => {
+    const item = (n, level) => ({ id: `${id}-${n}`, createdAt: record.createdAt, controllers: { c: "human", h: "engine" }, level, moves: 3, result: null, corrupted: false });
+    const html = renderToStaticMarkup(createElement(GameList, { items: [item(1, "max"), item(2, "max20")], liveId: null,
+      onOpen() {}, onExport() {}, onExportAll() {}, onImport() {}, error: null })).replaceAll("<!-- -->", "");
+    expect(html).toContain("한 엔진 · 최강 · 3초 · 3수");
+    expect(html).toContain("한 엔진 · 최강 · 20초 · 3수");
   });
 });
 

@@ -4,6 +4,10 @@ import { forbiddenMove } from "./repetition.js";
 
 const NAME = { c: "초(파랑)", h: "한(빨강)" };
 
+// 난이도: 2~4 는 원본 엔진, max·max20 은 Fairy-Stockfish 가 3초·20초 읽고 둔다(max20 은 사용자 요청 2026-09-30).
+export const LEVELS = [2, 3, 4, "max", "max20"];
+export const isMaxLevel = (level) => level === "max" || level === "max20";
+
 // 시각·저장·타이머는 화면/저장 계층이 맡는다.
 export function newGame({ controllers = { c: "human", h: "engine" }, level = 3,
   setups = { c: "마상마상", h: "마상마상" }, bottom = "c", repetition = true } = {}) {

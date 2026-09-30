@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { createAnalyzer, ISOLATION_REASON } from "./fsf.js";
 import { analysisPositions, cacheEvaluation, syncAnalysisCache } from "./gameAnalysis.js";
+import { MOVETIME } from "./service.js";
 
 // mode: 분석 모드(fast·deep·continuous). deepen: 깊게 볼 국면(복기의 k수째), null 이면 마지막 국면.
 // deepCap: 저장된 판 복기의 2단계 상한(service DEEP_CAPS), null 이면 지금 "계속"(진행 중인 판과 그 복기).
-export function useAnalysis(game, { mode = "fast", deepen = null, deepCap = null } = {}) {
+// maxTime: 최강 탐색의 생각 시간(3000·20000) — 다음 최강 탐색부터.
+export function useAnalysis(game, { mode = "fast", deepen = null, deepCap = null, maxTime = MOVETIME.max } = {}) {
   const latest = useRef(game);
   latest.current = game;
   const serviceRef = useRef(null);
@@ -31,6 +33,8 @@ export function useAnalysis(game, { mode = "fast", deepen = null, deepCap = null
     serviceRef.current = service;
     return () => { alive = false; service.dispose(); serviceRef.current = null; };
   }, []);
+  // 생각 시간은 동기화보다 먼저 맞춘다: 최강 · 20초로 새 판을 열면 그 sync 가 바로 최강 탐색을 시작할 수 있다.
+  useEffect(() => { serviceRef.current.setMaxTime(maxTime); }, [maxTime]);
   // 판별 캐시: 복기 판과 진행 중인 판을 오가도 계산해 둔 평가를 잃지 않는다.
   const cachesRef = useRef(new Map());
   const baseFor = (g) => (cacheRef.current?.id === g.id ? cacheRef.current : cachesRef.current.get(g.id) ?? null);
@@ -48,6 +52,6 @@ export function useAnalysis(game, { mode = "fast", deepen = null, deepCap = null
   // Render immediately against the new game, even before the synchronization effect runs.
   const view = syncAnalysisCache(cache.id === game.id ? cache : cachesRef.current.get(game.id) ?? null, game);
   const ply = game.moves.length;
-  return { serviceRef, status, haltDeepen: () => serviceRef.current?.haltDeepen(), cacheId: view.id, cache: view.analysis,
+  return { serviceRef, status, haltDeepen: () => serviceRef.current?.haltDeepen(), moveNow: () => serviceRef.current?.moveNow(), cacheId: view.id, cache: view.analysis,
     results: view.results, evals: view.analysis?.evals, current: view.results[ply], evaluation: view.analysis?.evals[ply] };
 }

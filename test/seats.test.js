@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bottomOf, nationAt, seatsOf, chooseNation, nextGame, pendingOf, whoApplied } from "../src/seats.js";
+import { bottomOf, nationAt, seatsOf, chooseNation, nextGame, pendingOf, whoApplied, withLevel } from "../src/seats.js";
 
 const game = (extra = {}) => ({ controllers: { c: "human", h: "engine" }, setups: { c: "마상마상", h: "상마상마" }, level: 3, bottom: "c", ...extra });
 
@@ -34,6 +34,20 @@ describe("seats: top/bottom settings (user request 2026-09-28)", () => {
     const s = chooseNation(seatsOf(g), "top", "c");
     expect(pendingOf(s, 3, g)).toEqual({ nation: true, top: false, bottom: false, level: false });
     expect(pendingOf({ ...seatsOf(g), top: { who: "engine", setup: "마상상마" } }, "max", g)).toEqual({ nation: false, top: true, bottom: false, level: true });
+  });
+  // 최강 · 3초 ↔ 최강 · 20초만 대국 중에 바로 바뀐다(사용자 요청 2026-09-30). 다른 난이도가 끼면 새 게임부터.
+  it("applies a change between the two max levels to the current game at once; other level changes wait for a new game", () => {
+    const g = game({ level: "max" });
+    expect(withLevel(g, "max20")).toEqual({ ...g, level: "max20" });
+    expect(withLevel(game({ level: "max20" }), "max").level).toBe("max");
+    expect(pendingOf(seatsOf(g), "max20", withLevel(g, "max20")).level).toBe(false);
+    for (const [from, to] of [[3, "max20"], ["max20", 4], ["max", 2]]) {
+      const before = game({ level: from });
+      expect(withLevel(before, to)).toBe(before);
+      expect(pendingOf(seatsOf(before), to, withLevel(before, to)).level).toBe(true);
+    }
+    const over = game({ level: "max", over: "초 승" });           // 끝난 판의 기보는 바꾸지 않는다(두는 이와 같은 규칙)
+    expect(withLevel(over, "max20")).toBe(over);
   });
   it("applies a seat's who-plays to the nation sitting there in the current game, even with a nation change pending", () => {
     expect(whoApplied(game(), "top", "human")).toEqual({ c: "human", h: "human" });

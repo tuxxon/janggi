@@ -1,5 +1,5 @@
 import { SETUPS } from "./engine.js";
-import { newGame, play } from "./game.js";
+import { newGame, play, LEVELS } from "./game.js";
 import { bottomOf } from "./seats.js";
 import { moveToUci, uciToMove } from "./notation.js";
 
@@ -16,7 +16,7 @@ function validate(record) {
   }
   if (record.bottom !== undefined && !["c", "h"].includes(record.bottom)) bad("판 방향");
   if (record.repetition !== undefined && typeof record.repetition !== "boolean") bad("반복수 규칙");
-  if (![2, 3, 4, "max"].includes(record.level)) bad("난이도");
+  if (!LEVELS.includes(record.level)) bad("난이도");
   if (!Array.isArray(record.moves)) bad("수순");
   if (record.result !== null && (!record.result || !["c", "h"].includes(record.result.winner) || record.result.reason !== "외통수")) bad("결과");
 }

@@ -1345,3 +1345,94 @@ describe("review deep look: the second stage for saved games (spec 2.10)", () =>
       "setoption name MultiPV value 1", "position fen fen-0", "go movetime 60000"]);
   });
 });
+
+// 최강 · 20초(사용자 요청 2026-09-30): 최강 탐색의 생각 시간, 생각하는 동안의 경과 시각, 지금 두기.
+describe("max think time and move now (user request 2026-09-30)", () => {
+  const exact = (depth, cp, move = "a4a5") => `info depth ${depth} multipv 1 score cp ${cp} nodes 100 pv ${move}`;
+  const maxTurn = (ply = 0) => position(ply, ply % 2 ? "h" : "c", { max: true });
+  it("searches a max engine turn for the set think time; a change applies from the next max search", async () => {
+    const { service, engine } = setup();
+    service.setMaxTime(20000);
+    service.sync("g", [maxTurn(0)]); await service.ready;
+    expect(engine.commands.slice(-3)).toEqual(["setoption name MultiPV value 1", "position fen fen-0", "go movetime 20000"]);
+    service.setMaxTime(3000);                                                  // 달리는 탐색은 그대로
+    expect(engine.commands.at(-1)).toBe("go movetime 20000");
+    engine.finish(); await tick();
+    service.sync("g", [position(0), position(1), maxTurn(2)]); await tick();
+    expect(engine.searches.at(-1)).toBe("go movetime 3000");                  // 최강 차례가 먼저, 새 시간으로
+  });
+  it("rejects a think time other than 3 s or 20 s", () => {
+    const { service } = setup();
+    for (const ms of [5000, 0, Infinity, "20000"]) expect(() => service.setMaxTime(ms)).toThrow("생각 시간");
+  });
+  it("the watchdog of a 20 s max search is 20 s + 15 s", async () => {
+    vi.useFakeTimers();
+    const { service, engine } = setup();
+    service.setMaxTime(20000);
+    service.sync("g", [maxTurn(0)]);
+    await vi.advanceTimersByTimeAsync(0); await service.ready;
+    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    const starts = () => engine.commands.filter((c) => c === "uci").length;
+    await vi.advanceTimersByTimeAsync(34_999);
+    expect(starts()).toBe(1);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(starts()).toBe(2);
+  });
+  it("status.maxSince and maxMovetime describe the running max search only", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const { service, engine } = setup({ mode: "continuous" });
+    service.setMaxTime(20000);
+    service.sync("g", [position(0)]);
+    await vi.advanceTimersByTimeAsync(0); await service.ready;
+    expect(service.status).toMatchObject({ maxSince: null, maxMovetime: null });   // 0.8초 분석
+    engine.finish(); await vi.advanceTimersByTimeAsync(0);
+    expect(engine.searches.at(-1)).toBe("go movetime 60000");
+    expect(service.status).toMatchObject({ maxSince: null, maxMovetime: null });   // 깊게 보기
+    vi.setSystemTime(4000);
+    service.sync("g", [position(0), maxTurn(1)]);
+    engine.emit("bestmove a4a5"); await vi.advanceTimersByTimeAsync(0);
+    expect(engine.searches.at(-1)).toBe("go movetime 20000");
+    expect(service.status).toMatchObject({ maxSince: 4000, maxMovetime: 20000 });
+    engine.finish(); await vi.advanceTimersByTimeAsync(0);
+    expect(service.status).toMatchObject({ maxSince: null, maxMovetime: null });
+  });
+  it("moveNow stops the running max search and plays the best move found so far", async () => {
+    const { service, engine, results } = setup();
+    service.setMaxTime(20000);
+    service.sync("g", [maxTurn(0)]); await service.ready;
+    const move = service.bestMove(0);
+    engine.emit(exact(14, 25, "b1c3"));
+    service.moveNow();
+    expect(engine.commands.at(-1)).toBe("stop");
+    service.moveNow();                                                          // 두 번 눌러도 stop 은 한 번
+    expect(engine.commands.filter((c) => c === "stop")).toHaveLength(1);
+    engine.emit("bestmove b1c3"); await tick();
+    await expect(move).resolves.toEqual([82, 65]);                             // 버리지 않고 그 수를 둔다
+    expect(results.at(-1)).toMatchObject({ ply: 0, depth: 14, cp: 25, best: [82, 65] });
+    expect(service.status.state).toBe("ready");
+  });
+  it("moveNow before the first evaluation line waits for it, then stops (a search stopped with no score counts as an engine failure)", async () => {
+    const { service, engine } = setup();
+    service.setMaxTime(20000);
+    service.sync("g", [maxTurn(0)]); await service.ready;
+    const count = engine.commands.length;
+    service.moveNow();
+    expect(engine.commands).toHaveLength(count);
+    engine.emit(`info depth 5 multipv 1 score cp 10 lowerbound nodes 100 pv a4a5`); // bound 줄은 평가가 아니다
+    expect(engine.commands).toHaveLength(count);
+    engine.emit(exact(5, 12));
+    expect(engine.commands.at(-1)).toBe("stop");
+    engine.emit(exact(6, 13));
+    expect(engine.commands.filter((c) => c === "stop")).toHaveLength(1);
+  });
+  it("moveNow does nothing unless a max search is running", async () => {
+    const { service, engine } = setup({ mode: "continuous" });
+    service.sync("g", [position(0)]); await service.ready;
+    engine.emit(exact(10, 5));
+    service.moveNow();                                                          // 0.8초 분석
+    engine.finish(); await tick();
+    engine.emit(exact(14, 5));
+    service.moveNow();                                                          // 깊게 보기
+    expect(engine.commands).not.toContain("stop");
+  });
+});
