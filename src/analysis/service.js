@@ -74,17 +74,19 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
   let look = null;
   const waiters = new Set();
   let status = { state: "loading", pending: 0, nnue: "off", reason: null, deepening: false, deepSince: null, maxSince: null, maxMovetime: null,
-    lookSince: null, lookSpent: null };
+    lookSince: null, lookSpent: null, lookMove: null };
   // deepSince: 달리는 깊게 보기가 시작된 시각(ms) — 막대가 읽은 초를 센다. 선점 뒤 다시 시작하면 새로 센다.
   // maxSince·maxMovetime: 달리는 최강 탐색이 시작된 시각과 그 생각 시간 — 상태 줄이 "(7/20초)"를 센다.
-  const maxSearch = () => !!(active?.entry.max && !active.focus && !active.deepen && !active.cancelled);
+  const maxSearch = () => !!(active?.entry.max && !active.focus && !active.deepen && !active.look && !active.cancelled);
   function publish() {
     const deepening = !!(active?.deepen && !active.cancelled), thinking = maxSearch();
     status = { ...status, pending: entries.filter((e) => !e.result && !e.error).length,
       deepening, deepSince: deepening ? active.started : null,
       maxSince: thinking ? active.started : null, maxMovetime: thinking ? active.movetime : null,
-      // lookSince·lookSpent: 달리는 30초 깊게 보기가 (다시) 시작된 시각과 그 전까지 읽은 시간 — 안내 줄이 "(n/30초)"를 센다.
-      lookSince: active?.look && !active.cancelled ? active.started : null, lookSpent: look ? look.spent : null };
+      // lookSince·lookSpent·lookMove: 달리는 30초 깊게 보기가 (다시) 시작된 시각, 그 전까지 읽은 시간, 그 수 —
+      // 안내 줄이 "(n/30초)"를 세고, 칸의 "…"는 지금 읽는 수에만 붙는다.
+      lookSince: active?.look && !active.cancelled ? active.started : null, lookSpent: look ? look.spent : null,
+      lookMove: look ? look.move : null };
     if (!disposed) onStatus(status);
   }
   const send = (command) => engine.postMessage(command);
@@ -143,10 +145,22 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     return mode === "continuous" && entry?.result && !entry.max && !entry.error && !entry.capped &&
       (deepCap === null || !entry.finished) ? entry : null;
   };
-  const stopLook = () => { if (active?.look) { stop(); publish(); } };
+  // 초점(마우스 미리 보기)에 비킨다: 읽은 시간을 멈추는 그때 더한다(bestmove 까지 초가 0으로 튀지 않게). 남은 시간으로 이어 읽는다.
+  function pauseLook() {
+    if (!active?.look || active.cancelled) return;
+    if (active.look === look) look.spent += Date.now() - active.started;
+    stop(); publish();
+  }
+  // 끝까지 못 읽고 버린다(다른 수·새 국면·신경망 교체·엔진 꺼짐·화면의 취소): 그때까지의 줄과 읽은 시간을 한 번 알린다 —
+  // 화면이 "다 읽음"과 "멈춤"을 가르고 읽은 초를 적는다(리뷰 MED).
   function cancelLook() {
     if (!look) return;
-    look = null; stopLook(); publish();
+    const old = look, running = active?.look === old && !active.cancelled;
+    const spent = old.spent + (running ? Date.now() - active.started : 0);
+    look = null;
+    if (running) stop();
+    old.onUpdate({ ...(old.last ?? { move: old.move }), done: false, ended: true, spent });
+    publish();
   }
   function cancelFocus() {
     if (!focus) return;
@@ -177,7 +191,7 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       await start();
     } else {
       status = { ...status, state: "disabled", nnue: "off", reason };
-      cancelFocus();
+      cancelFocus(); cancelLook();
       for (const entry of entries) settle(entry, null, new Error(reason));
       networkChange?.reject(new Error(reason)); networkChange = null;
       publish();
@@ -319,10 +333,10 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
     const job = active;
     active = null;
     if (job.look) {
-      // 끊긴 것(초점)은 읽은 시간을 더해 두고 이어 읽는다. 버린 것(다른 수·새 국면)은 job.look !== look 이다.
-      if (job.look === look) {
-        if (job.cancelled) look.spent += Date.now() - job.started;
-        else { look = null; if (job.look.last) job.look.onUpdate({ ...job.look.last, done: true }); }
+      // 끊긴 것(초점)은 pauseLook 이 읽은 시간을 더해 두었고 이어 읽는다. 버린 것은 job.look !== look 이다.
+      if (job.look === look && !job.cancelled) {
+        look = null;
+        if (job.look.last) job.look.onUpdate({ ...job.look.last, done: true, ended: true, spent: job.look.spent + (Date.now() - job.started) });
       }
     } else if (job.deepen) {
       if (!job.cancelled) job.entry.capped = true; // 상한까지 다 읽었다(선점으로 멈춘 것은 나중에 이어서 본다)
@@ -423,17 +437,19 @@ export function createAnalysisService({ createEngine, loadNetwork = async () => 
       if (!entry || !moves.length || disposed || status.state === "disabled") return Promise.resolve(null);
       focus = { ...deferred(), entry, moves: [...new Set(moves)] };
       const promise = focus.promise;
-      stopDeepening(); stopLook(); pump(); return promise;
+      stopDeepening(); pauseLook(); pump(); return promise;
     },
     cancelFocus,
-    // 30초 깊게 보기: ply 국면의 move(UCI) 하나만 MultiPV 1 로 30초. onUpdate({ move, cp|mate, win, depth, done }) —
-    // 두는 쪽 기준, 더 깊은 정확한 줄마다 done: false, 다 읽으면 마지막 줄로 done: true. 다른 look 은 바꾼다.
+    // 30초 깊게 보기: ply 국면의 move(UCI) 하나만 MultiPV 1 로 30초. onUpdate({ move, cp|mate, win, depth, done, ended, spent }) —
+    // 두는 쪽 기준, 더 깊은 정확한 줄마다 done: false, 끝나면 ended: true 로 한 번 더(다 읽었으면 done: true, 버렸으면
+    // done: false — 줄이 없었으면 move 만) 읽은 시간 spent(ms)와 함께. 다른 look 은 바꾼다. 시작했는지를 돌려준다.
     look(ply, move, onUpdate) {
       const entry = entries.find((e) => e.ply === ply);
-      if (!entry || disposed || status.state === "disabled") return;
-      stopLook();
+      if (!entry || disposed || status.state === "disabled") return false;
+      cancelLook();
       look = { entry, move, onUpdate, spent: 0, depth: 0, last: null };
       stopDeepening(); publish(); pump();
+      return true;
     },
     cancelLook,
     setMode(next) {

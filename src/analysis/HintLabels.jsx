@@ -2,8 +2,9 @@
 import { moveToUci, uciToMove, describeMove } from "../notation.js";
 import { grade, gradeColor } from "../winrate.js";
 
-// deep: 오른쪽 클릭 30초 깊게 보기 결과(수 → { move, win, depth, done }) — 그 칸은 0.5초 값 대신 이것과 깊이를 쓴다.
-export function HintLabels({ candidates = [], focused = [], targets = [], deep = {}, passSquare, turnWin, hovered, xy, board }) {
+// deep: 오른쪽 클릭 30초 깊게 보기 결과(수 → { move, win, depth, … }) — 그 칸은 0.5초 값 대신 이것과 깊이를 쓴다.
+// reading: 지금 읽는 수(서비스의 lookMove). "…"는 그 수에만 붙는다.
+export function HintLabels({ candidates = [], focused = [], targets = [], deep = {}, reading = null, passSquare, turnWin, hovered, xy, board }) {
   const labels = new Map(), allowed = new Set(targets.map(moveToUci));
   for (const candidate of candidates) {
     const move = uciToMove(candidate.move), to = move === "pass" ? passSquare : move?.[1];
@@ -25,7 +26,7 @@ export function HintLabels({ candidates = [], focused = [], targets = [], deep =
           stroke="#fff5de" strokeWidth="4" paintOrder="stroke" fontWeight="900"
           fontSize={candidate.target ? hovered === to ? 22 : 16 : 13}>{Math.round(candidate.win)}%</text>
         {candidate.deep && <text x={x} y={y + 25} textAnchor="middle" fill="#3a2c20" stroke="#fff5de" strokeWidth="3"
-          paintOrder="stroke" fontWeight="700" fontSize="11">{`깊이 ${candidate.depth}${candidate.done ? "" : "…"}`}</text>}
+          paintOrder="stroke" fontWeight="700" fontSize="13">{`깊이 ${candidate.depth}${candidate.move === reading ? "…" : ""}`}</text>}
       </g>;
     })}
   </g>;

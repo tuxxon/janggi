@@ -98,20 +98,22 @@ export function WinBar({ a, status, fen, stable = null }) {
 }
 
 // 후보 목록. depth: 저장된 판 복기에서는 후보마다 깊이를 적는다 — 2단계 1순위와 1단계 후보는 깊이가 다른 점수다(개정 2.10).
-// 오른쪽 클릭 30초 깊게 보기의 안내 줄(사용자 요청 2026-09-30). since·spent: 서비스의 lookSince·lookSpent —
-// spent 가 있으면 읽는 중(since 가 없으면 미리 보기에 끊겨 멈춘 동안), 없으면 다 읽었다.
-export function LookNote({ board, move, result, since, spent }) {
+// 오른쪽 클릭 30초 깊게 보기의 안내 줄(사용자 요청 2026-09-30). reading: 서비스가 지금 이 수를 읽는다. since·spent: 서비스의
+// lookSince·lookSpent(since 가 없으면 미리 보기에 끊겨 멈춘 동안). 읽지 않으면 결과의 ended·done·spent 로 다 읽음과 멈춤을 가른다.
+export function LookNote({ board, move, result, reading, since, spent }) {
   const [, setTick] = useState(0);
   useEffect(() => {
     if (since == null) return;
     const t = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, [since]);
-  const reading = spent != null, total = MOVETIME.look / 1000;
-  const secs = Math.min(total, Math.floor(((spent ?? 0) + (since != null ? Date.now() - since : 0)) / 1000));
+  const total = MOVETIME.look / 1000;
+  if (!reading && !result) return null; // 줄 없이 멈췄다
+  const secs = reading ? Math.floor(((spent ?? 0) + (since != null ? Date.now() - since : 0)) / 1000) : Math.floor((result.spent ?? 0) / 1000);
   const value = result ? `${Math.round(result.win)}% · 깊이 ${result.depth}` : "읽는 중";
-  return <div data-testid="look-note" style={{ fontSize: 12, color: "#3a2c20", marginTop: 4 }}>
-    {`${reading ? "깊게 보는 수" : "깊게 본 수"}: ${describeMove(board, move)} · ${value} (${reading ? `${secs}/${total}초` : `${total}초`})`}
+  const time = reading ? `${Math.min(total, secs)}/${total}초` : result.done ? `${total}초` : `${Math.min(total, secs)}/${total}초에서 멈춤`;
+  return <div data-testid="look-note" style={{ fontSize: 12, color: "#3a2c20" }}>
+    {`${reading ? "깊게 보는 수" : "깊게 본 수"}: ${describeMove(board, move)} · ${value} (${time})`}
   </div>;
 }
 
@@ -127,6 +129,8 @@ export function Candidates({ candidates, board, depth }) {
     </ol>
   );
 }
+
+const NO_LOOKS = { key: null, current: null, byMove: {} };
 
 export default function Janggi() {
   const [session] = useState(() => {
@@ -146,7 +150,9 @@ export default function Janggi() {
   // 마우스 미리 보기(후보 수 보기에서만): 올린 내 기물. 오른쪽 클릭 30초 깊게 보기: 그 국면(key)에서 고른 수와 수마다 결과
   // (사용자 요청 2026-09-30).
   const [preview, setPreview] = useState(null);
-  const [looks, setLooks] = useState({ key: null, current: null, byMove: {} });
+  const [looks, setLooks] = useState(NO_LOOKS);
+  // 30초 깊게 보기의 콜백 표: 오른쪽 클릭마다, 후보 수 보기를 끌 때, 신경망을 바꿀 때 바꾼다 — 옛 결과가 되살아나지 않게(리뷰 MED).
+  const lookToken = useRef(0);
   const [moveError, setMoveError] = useState(null);
   const [networkError, setNetworkError] = useState(null);
   const [networkBusy, setNetworkBusy] = useState(false);
@@ -231,10 +237,12 @@ export default function Janggi() {
   // 30초 깊게 보기는 그 국면에서만: 수를 두거나 복기에서 다른 수째로 가면 멈춘다(결과는 key 로 남는다).
   const lookKey = `${fGame.id}:${fPly}:${toFen(view.b, view.turn)}`;
   const deep = looks.key === lookKey ? looks.byMove : {};
+  const readingMove = looks.key === lookKey ? analysis.status.lookMove : null; // 서비스가 지금 읽는 수
   useEffect(() => { serviceRef.current?.cancelLook(); }, [lookKey, serviceRef]);
 
   async function updateNetwork(file) {
     setNetworkBusy(true); setNetworkError(null);
+    lookToken.current++; setLooks(NO_LOOKS); // 다른 신경망으로 읽은 깊게 보기는 버린다(개정 2.13)
     try {
       if (file) await serviceRef.current.addNetwork(file);
       else await serviceRef.current.clearNetwork();
@@ -261,9 +269,13 @@ export default function Janggi() {
   function play(m, slide) { setSel(null); setDrag(null); setG({ ...applyMove(g, m), slide }); }
 
   function onDown(e) {
-    if (e.button !== 0 || !canSelect) return; // 오른쪽 클릭은 onContext(두지 않는다)
+    // 오른쪽 클릭은 onContext(두지 않는다). 맥의 Ctrl+클릭도 메뉴(오른쪽 클릭)로 온다(리뷰 LOW).
+    if (e.button !== 0 || e.ctrlKey || !canSelect) return;
     const { x, y } = toSvg(e), i = idxAt(x, y);
     if (i === null) return;
+    // 누르면 미리 보기를 걷는다: 집은 기물을 다시 눌러 내려놓아도 그 위에 머문 마우스가 곧바로 되살리지 않게, 그 칸을 벗어나야
+    // 다시 미리 본다(리뷰 MED).
+    clearTimeout(hoverTimer.current); setPreview(null); hoverHold.current = i;
     if (blocked && sel === blocked[0] && i === blocked[1]) { setNotice(REPETITION_NOTICE); return; }
     const t = targets.find((m) => m[1] === i);
     if (t) { if (!review) play(t, true); return; } // 선택 후 목적지를 탭(복기에서는 두지 않는다)
@@ -275,15 +287,17 @@ export default function Janggi() {
     } else setSel(null);
   }
   // 마우스 미리 보기: 내 기물 위에 잠깐(0.15초) 머물면 그 기물을 보여준다. 빈 칸·도착 칸으로 옮겨도 남고, 판을 벗어나면 지운다.
-  const hoverTimer = useRef(null);
+  const hoverTimer = useRef(null), hoverHold = useRef(null);
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
   function hover(e) {
     if (e.pointerType !== "mouse" || !hints || !canSelect) return;
     const { x, y } = toSvg(e), i = idxAt(x, y), p = i === null ? null : view.b[i];
+    if (i === hoverHold.current) return;
+    hoverHold.current = null;
     clearTimeout(hoverTimer.current);
     if (p && p[0] === view.turn && i !== preview) hoverTimer.current = setTimeout(() => setPreview(i), 150);
   }
-  function leave() { clearTimeout(hoverTimer.current); setPreview(null); }
+  function leave() { clearTimeout(hoverTimer.current); setPreview(null); hoverHold.current = null; }
   // 오른쪽 클릭: 보여준 기물의 도착 칸이면 그 수만 30초 깊게 읽는다(두지 않는다). 후보 수 보기일 때만 브라우저 메뉴를 막는다.
   function onContext(e) {
     if (!hints) return;
@@ -291,12 +305,17 @@ export default function Janggi() {
     if (!canSelect) return;
     const { x, y } = toSvg(e), i = idxAt(x, y), t = i === null ? null : shownTargets.find((m) => m[1] === i);
     if (!t) return;
-    const move = moveToUci(t), key = lookKey;
+    const move = moveToUci(t), key = lookKey, token = ++lookToken.current;
+    // 줄 없이 끝난 알림(win 없음)은 칸·안내 줄에 쓸 것이 없다. 서비스가 거절하면(엔진 꺼짐) 아무것도 바꾸지 않는다.
+    const started = analysis.look(fPly, move, (u) => {
+      if (lookToken.current !== token || u.win === undefined) return;
+      setLooks((prev) => (prev.key === key ? { ...prev, byMove: { ...prev.byMove, [u.move]: u } } : prev));
+    });
+    if (!started) return;
     setLooks((prev) => {
       const { [move]: _, ...rest } = prev.key === key ? prev.byMove : {}; // 같은 수를 다시 고르면 새로 읽는다
       return { key, current: move, byMove: rest };
     });
-    analysis.look(fPly, move, (u) => setLooks((prev) => (prev.key === key ? { ...prev, byMove: { ...prev.byMove, [u.move]: u } } : prev)));
   }
   function onMove(e) {
     if (!drag) { hover(e); return; }
@@ -467,15 +486,18 @@ export default function Janggi() {
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}>
           <input type="checkbox" checked={hints} onChange={(e) => {
             setHints(e.target.checked);
-            if (!e.target.checked) { analysis.cancelLook(); setPreview(null); setLooks({ key: null, current: null, byMove: {} }); }
+            if (!e.target.checked) { lookToken.current++; analysis.cancelLook(); setPreview(null); setLooks(NO_LOOKS); }
             if (!e.target.checked && review) setSel(null);
           }} />후보 수 보기
         </label>
         {hints && <div style={{ fontSize: 12, color: "#65584a", marginTop: 4 }}>
           {view.turn === "c" ? "초" : "한"}가 둘 수 · 두는 쪽 승률
           <Candidates candidates={candidates} board={view.b} depth={savedReview} />
-          {looks.key === lookKey && looks.current && <LookNote board={view.b} move={looks.current} result={looks.byMove[looks.current]}
-            since={analysis.status.lookSince} spent={analysis.status.lookSpent} />}
+          {/* 안내 줄 자리는 늘 둔다: 생길 때 판이 마우스 밑에서 밀리지 않게(리뷰 LOW). */}
+          <div style={{ minHeight: 18, marginTop: 4 }}>
+            {looks.key === lookKey && looks.current && <LookNote board={view.b} move={looks.current} result={looks.byMove[looks.current]}
+              reading={readingMove === looks.current} since={analysis.status.lookSince} spent={analysis.status.lookSpent} />}
+          </div>
           {!candidates.length && <span>상위 5수는 이 국면을 분석한 뒤에 보여요. 기물을 집으면 그 기물의 수마다 승률이 떠요.</span>}
         </div>}
         <Tray side={flip ? "c" : "h"} />
@@ -537,7 +559,7 @@ export default function Janggi() {
                 <circle key={"t" + m[1]} cx={x} cy={y} r="9" fill={MARK} />
               );
             })}
-            {blocked && sel === blocked[0] && (() => {
+            {blocked && shown === blocked[0] && (() => {
               const [x, y] = xy(blocked[1]);
               return (
                 <g data-testid="repetition-blocked" style={{ pointerEvents: "none" }}>
@@ -552,7 +574,7 @@ export default function Janggi() {
                 <Piece p={view.b[drag.i]} x={drag.x} y={drag.y} selected lifted />
               </g>
             )}
-            {hints && <HintLabels candidates={candidates} focused={focusCandidates} targets={shownTargets} deep={deep} turnWin={turnWin} board={view.b}
+            {hints && <HintLabels candidates={candidates} focused={focusCandidates} targets={shownTargets} deep={deep} reading={readingMove} turnWin={turnWin} board={view.b}
               passSquare={kingIdx(view.b, view.turn)} hovered={drag?.moved ? idxAt(drag.x, drag.y) : null} xy={xy} />}
           </svg>
         </div>

@@ -142,14 +142,20 @@ describe("move deep look note (user request 2026-09-30)", () => {
   it("names the move, its win, depth and the seconds read so far", () => {
     vi.useFakeTimers(); vi.setSystemTime(100_000);
     try {
-      expect(note({ result: null, since: 100_000, spent: 0 })).toContain("깊게 보는 수: 졸 a4→a5 · 읽는 중 (0/30초)");
-      expect(note({ result: { move: "a4a5", win: 57.4, depth: 24, done: false }, since: 95_000, spent: 7000 }))
+      expect(note({ reading: true, result: null, since: 100_000, spent: 0 })).toContain("깊게 보는 수: 졸 a4→a5 · 읽는 중 (0/30초)");
+      expect(note({ reading: true, result: { move: "a4a5", win: 57.4, depth: 24, done: false }, since: 95_000, spent: 7000 }))
         .toContain("깊게 보는 수: 졸 a4→a5 · 57% · 깊이 24 (12/30초)");
-      expect(note({ result: { move: "a4a5", win: 57.4, depth: 24, done: false }, since: null, spent: 4000 }))
+      expect(note({ reading: true, result: { move: "a4a5", win: 57.4, depth: 24, done: false }, since: null, spent: 4000 }))
         .toContain("(4/30초)");                                                // 미리 보기에 끊긴 동안은 멈춘다
-      expect(note({ result: { move: "a4a5", win: 57.4, depth: 29, done: true }, since: null, spent: null }))
+      expect(note({ reading: false, result: { move: "a4a5", win: 57.4, depth: 29, done: true, ended: true, spent: 30004 } }))
         .toContain("깊게 본 수: 졸 a4→a5 · 57% · 깊이 29 (30초)");
     } finally { vi.useRealTimers(); }
+  });
+  // 리뷰 MED: 중간에 버린 것은 "다 읽음(30초)"이 아니라 읽은 초와 함께 멈췄다고 적는다. 줄 없이 멈췄으면 적지 않는다.
+  it("tells a stopped look apart from a finished one", () => {
+    expect(note({ reading: false, result: { move: "a4a5", win: 47.2, depth: 17, done: false, ended: true, spent: 3400 } }))
+      .toContain("깊게 본 수: 졸 a4→a5 · 47% · 깊이 17 (3/30초에서 멈춤)");
+    expect(note({ reading: false, result: undefined })).toBe("");
   });
 });
 

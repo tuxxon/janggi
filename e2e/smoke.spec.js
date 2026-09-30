@@ -311,6 +311,102 @@ test("후보 수 보기를 켜면 기물에 마우스만 올려도 도착 칸 �
   await expect(note).toHaveCount(0);                                                // 수를 두면 사라진다
 });
 
+// 리뷰(2026-09-30) MED: 중간에 멈춘 깊게 보기는 "다 읽음"이 아니고, "…"는 지금 읽는 수에만. 안내 줄이 생겨도 판이 밀리지 않는다.
+test("다른 칸으로 바꾸거나 두고 무르면 앞의 깊게 보기는 멈췄다고 적고 '…'가 남지 않는다 (리뷰 MED)", async ({ page }) => {
+  await openGame(page);
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
+  await page.getByLabel("후보 수 보기").check();
+  await expect(page.getByTestId("candidates").locator("li")).toHaveCount(5, { timeout: 30_000 });
+  await hoverBoard(page, 6, 0);
+  await expect(page.getByTestId("target-win")).toHaveCount(2, { timeout: 10_000 });
+  const boardY = async () => (await page.locator("svg[data-fen]").boundingBox()).y;
+  const y0 = await boardY();
+  await clickBoard(page, 5, 0, { button: "right" });                               // a5
+  const note = page.getByTestId("look-note");
+  await expect(note).toContainText(/졸 a4→a5 · \d+% · 깊이 \d+ \(\d+\/30초\)/, { timeout: 10_000 });
+  expect(await boardY()).toBe(y0);                                                  // 판이 마우스 밑에서 밀리지 않는다
+  const a5 = page.locator('[data-testid="target-win"][data-move="a4a5"][data-deep="true"]');
+  await expect(a5).toContainText("…");
+  await clickBoard(page, 6, 1, { button: "right" });                               // b4 로 바꾼다
+  await expect(note).toContainText(/졸 a4→b4 · \d+% · 깊이 \d+ \(\d+\/30초\)/, { timeout: 10_000 });
+  await expect(a5).toContainText(/깊이 \d+$/);                                     // a5 는 이제 읽지 않는다
+  await clickSq(page, 6, 2); await clickSq(page, 5, 2);                             // 두고
+  await expect.poll(async () => (await latestRecord(page))?.moves).toEqual(["c4c5"]);
+  await page.getByRole("button", { name: "무르기" }).click();                       // 같은 국면으로 돌아온다
+  await expect.poll(async () => (await latestRecord(page))?.moves).toEqual([]);
+  await expect(note).toContainText(/깊게 본 수: 졸 a4→b4 · \d+% · 깊이 \d+ \(\d+\/30초에서 멈춤\)/);
+  await hoverBoard(page, 6, 0);
+  await expect(page.locator('[data-testid="target-win"][data-deep="true"]')).toHaveCount(2, { timeout: 10_000 });
+  for (const text of await page.locator('[data-testid="target-win"][data-deep="true"]').allTextContents()) expect(text).not.toContain("…");
+});
+
+test("신경망을 바꾸면 깊게 본 결과를 지운다 (리뷰 MED)", async ({ page }) => {
+  await openGame(page);
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
+  await page.getByLabel("후보 수 보기").check();
+  await expect(page.getByTestId("candidates").locator("li")).toHaveCount(5, { timeout: 30_000 });
+  await hoverBoard(page, 6, 0);
+  await expect(page.getByTestId("target-win")).toHaveCount(2, { timeout: 10_000 });
+  await clickBoard(page, 5, 0, { button: "right" });
+  await expect(page.getByTestId("look-note")).toContainText("깊이", { timeout: 10_000 });
+  await page.getByRole("button", { name: "신경망 지우기" }).click();
+  await expect(page.getByTestId("look-note")).toHaveCount(0);
+  await expect(page.locator('[data-testid="target-win"][data-deep="true"]')).toHaveCount(0);
+});
+
+// 리뷰(2026-09-30) MED: 약속한 동작마다 깨지면 실패하는 테스트.
+test("미리 보기는 마우스가 0.15초 머물 때만, 펜·터치는 아니다. 메뉴는 후보 수 보기일 때만 막고, 끄면 깊게 보기를 멈춘다 (리뷰 MED)", async ({ page }) => {
+  await logUci(page);
+  await openGame(page);
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
+  await page.evaluate(() => window.addEventListener("contextmenu", (e) => { window.__menu = !e.defaultPrevented; }));
+  await clickBoard(page, 5, 0, { button: "right" });
+  expect(await page.evaluate(() => window.__menu)).toBe(true);                      // 후보 수 보기가 꺼져 있으면 브라우저 메뉴 그대로
+  await page.getByLabel("후보 수 보기").check();
+  await expect(page.getByTestId("candidates").locator("li")).toHaveCount(5, { timeout: 30_000 });
+  await hoverBoard(page, 6, 0); await hoverBoard(page, 5, 1);                      // 졸 위를 스치고 빈 칸에 머문다
+  await page.waitForTimeout(1200);                                                  // 0.15초 + 초점 0.5초가 지나도
+  expect(await page.getByTestId("target-win").count()).toBe(0);
+  const pen = await page.locator("svg[data-fen]").evaluate((el) => {                // 펜으로 졸 위에 머문다
+    const pt = el.createSVGPoint(); pt.x = 40; pt.y = 40 + 6 * 60;
+    const s = pt.matrixTransform(el.getScreenCTM());
+    el.dispatchEvent(new PointerEvent("pointermove", { pointerType: "pen", clientX: s.x, clientY: s.y, bubbles: true }));
+    return true;
+  });
+  expect(pen).toBe(true);
+  await page.waitForTimeout(1200);
+  expect(await page.getByTestId("target-win").count()).toBe(0);
+  await hoverBoard(page, 6, 0);
+  await expect(page.getByTestId("target-win")).toHaveCount(2, { timeout: 10_000 });
+  await clickBoard(page, 5, 0, { button: "right" });
+  await expect.poll(async () => (await uci(page)).includes("> go movetime 30000 searchmoves a4a5"), { timeout: 10_000 }).toBe(true);
+  const mark = (await uci(page)).length;
+  await page.getByLabel("후보 수 보기").uncheck();                                   // 끄면 멈춘다
+  await expect.poll(async () => (await uci(page)).slice(mark), { timeout: 10_000 }).toContain("> stop");
+  await expect.poll(async () => (await uci(page)).slice(mark).some((l) => l.startsWith("< bestmove")), { timeout: 10_000 }).toBe(true);
+  await page.getByLabel("후보 수 보기").check();
+  await expect(page.getByTestId("candidates").locator("li")).toHaveCount(5, { timeout: 30_000 });
+  expect((await uci(page)).slice(mark).filter((l) => l.includes("searchmoves a4a5"))).toEqual([]);
+  await expect(page.getByTestId("look-note")).toHaveCount(0);
+});
+
+// 리뷰(2026-09-30) MED: 집은 기물을 다시 눌러 내려놓으면, 마우스가 그 위에 있어도 미리 보기로 되살아나지 않는다.
+test("집은 기물을 다시 눌러 내려놓으면 점과 승률이 사라지고 다시 뜨지 않는다 (리뷰 MED)", async ({ page }) => {
+  await openGame(page);
+  await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
+  await page.getByLabel("후보 수 보기").check();
+  await expect(page.getByTestId("candidates").locator("li")).toHaveCount(5, { timeout: 30_000 });
+  await clickSq(page, 6, 0);
+  await expect(page.getByTestId("target-win")).toHaveCount(2, { timeout: 10_000 });
+  await clickSq(page, 6, 0);                                                        // 내려놓는다(마우스는 그 위)
+  await page.waitForTimeout(1200);                                                  // 미리 보기 0.15초 + 초점 0.5초가 지나도
+  expect(await page.getByTestId("target-win").count()).toBe(0);
+  expect(await page.locator('svg[data-fen] circle[r="9"]').count()).toBe(0);
+  await clickSq(page, 6, 2); await clickSq(page, 4, 4);                             // 집고, 둘 수 없는 빈 칸을 눌러 내려놓는다
+  await page.waitForTimeout(1200);
+  expect(await page.getByTestId("target-win").count()).toBe(0);
+});
+
 test("후보 수 보기는 선택한 기물의 도착 칸에 승률을 붙이고 선택 해제 시 지운다", async ({ page }) => {
   await openGame(page);
   await page.getByLabel("위 두는 이", { exact: true }).selectOption("human");
@@ -441,6 +537,9 @@ test("반복수: 같은 수를 세 번째 두려 하면 그 칸에 ✕가 뜨고
   }
   await expect.poll(async () => (await latestRecord(page)).moves.length).toBe(8);
   expect((await latestRecord(page)).repetition).toBe(true);
+  await page.getByLabel("후보 수 보기").check();                                // 마우스 미리 보기에도 ✕(리뷰 LOW 2026-09-30)
+  await hoverBoard(page, 9, 0);
+  await expect(page.getByTestId("repetition-blocked")).toHaveCount(1, { timeout: 5_000 });
   await clickSq(page, 9, 0);                                                    // 초 차를 집는다
   await expect(page.getByTestId("repetition-blocked")).toHaveCount(1);          // a2 에 ✕
   await clickSq(page, 8, 0);                                                    // 막힌 칸을 누른다

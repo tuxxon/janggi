@@ -1552,7 +1552,9 @@ describe("move deep look (user request 2026-09-30)", () => {
     service.look(0, "g1f3", () => {});                                           // 바꾼다
     expect(engine.commands.at(-1)).toBe("stop");
     engine.emit(exact(12, 5)); engine.emit("bestmove b1c3"); await tick();
-    expect(first).toEqual([]);                                                   // 버린 탐색의 줄은 보내지 않는다
+    expect(first).toHaveLength(1);                                               // 버린 탐색은 "멈췄다" 한 번뿐,
+    expect(first[0]).toMatchObject({ move: "b1c3", ended: true, done: false });  // 멈춘 뒤 온 줄(깊이 12)은 보내지 않는다
+    expect(first[0]).not.toHaveProperty("depth");
     expect(engine.searches.at(-1)).toBe("go movetime 30000 searchmoves g1f3");
     service.cancelLook();
     expect(engine.commands.at(-1)).toBe("stop");
@@ -1575,5 +1577,137 @@ describe("move deep look (user request 2026-09-30)", () => {
     const count = engine.commands.length;
     service.look(5, "b1c3", () => {});
     expect(engine.commands).toHaveLength(count);
+  });
+});
+
+// 30초 깊게 보기 리뷰(2026-09-30): 멈춘 것과 다 읽은 것을 가르고, 읽은 시간을 바르게 센다.
+describe("move deep look: review fixes (2026-09-30)", () => {
+  const exact = (depth, cp, move = "b1c3") => `info depth ${depth} multipv 1 score cp ${cp} nodes 100 pv ${move}`;
+  const flush = () => vi.advanceTimersByTimeAsync(0);
+  async function looking(options) {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const s = setup(options);
+    s.service.sync("g", [position(0)]); await flush(); await s.service.ready;
+    s.engine.finish(); await flush();
+    return s;
+  }
+  it("a dropped look reports once what it read (ended, spent): replaced, cancelled, a new move, a network change", async () => {
+    const { service, engine } = await looking();
+    const a = [], b = [], c = [], d = [];
+    service.look(0, "b1c3", (u) => a.push(u)); await flush();
+    engine.emit(exact(14, 20));
+    vi.setSystemTime(4000);
+    service.look(0, "g1f3", (u) => b.push(u));                                  // 바꾼다
+    expect(a.at(-1)).toMatchObject({ move: "b1c3", depth: 14, done: false, ended: true, spent: 3000 });
+    engine.emit("bestmove b1c3"); await flush();
+    vi.setSystemTime(6000);
+    service.cancelLook();                                                        // 줄 없이 멈춤
+    expect(b).toEqual([{ move: "g1f3", done: false, ended: true, spent: 2000 }]);
+    engine.emit("bestmove g1f3"); await flush();
+    expect(service.look(0, "b1c3", (u) => c.push(u))).toBe(true); await flush();
+    service.sync("g", [position(0), position(1)]);                               // 수를 뒀다
+    expect(c.at(-1)).toMatchObject({ ended: true, done: false });
+    engine.emit("bestmove b1c3"); await flush();
+    engine.finish(); await flush();
+    service.look(1, "b1c3", (u) => d.push(u)); await flush();
+    const applied = service.setNetwork(null);                                    // 신경망 교체
+    expect(d.at(-1)).toMatchObject({ ended: true, done: false });
+    engine.emit("bestmove b1c3"); await flush(); await applied;
+    for (const list of [a, b, c, d]) expect(list.filter((u) => u.ended)).toHaveLength(1);
+  });
+  it("the natural end reports done with the time read", async () => {
+    const { service, engine } = await looking();
+    const updates = [];
+    service.look(0, "b1c3", (u) => updates.push(u)); await flush();
+    engine.emit(exact(20, 30));
+    vi.setSystemTime(31_000);
+    engine.emit("bestmove b1c3"); await flush();
+    expect(updates.at(-1)).toMatchObject({ depth: 20, done: true, ended: true, spent: 30000 });
+  });
+  it("status.lookMove names the look; lookSpent counts a preemption as soon as it happens, not at bestmove", async () => {
+    const { service, engine } = await looking();
+    expect(service.status.lookMove).toBe(null);
+    service.look(0, "b1c3", () => {}); await flush();
+    expect(service.status.lookMove).toBe("b1c3");
+    vi.setSystemTime(13_000);
+    void service.focus(0, ["a4a5"]);
+    expect(service.status).toMatchObject({ lookSince: null, lookSpent: 12000, lookMove: "b1c3" });   // bestmove 전
+    engine.emit("bestmove b1c3"); await flush();
+    expect(service.status.lookSpent).toBe(12000);
+    service.cancelLook();
+    expect(service.status).toMatchObject({ lookMove: null, lookSpent: null });
+  });
+  it("look() says whether it started (not for an unknown ply or a disabled engine)", async () => {
+    const { service } = await looking();
+    expect(service.look(5, "b1c3", () => {})).toBe(false);
+    expect(service.look(0, "b1c3", () => {})).toBe(true);
+  });
+  // 서비스 쪽 리뷰어의 빈틈·버그 테스트(뮤턴트 넷과 버그 둘을 잡는다).
+  it("a replacing look starts with the full 30 s, not charged the replaced look's time", async () => {
+    const { service, engine } = await looking();
+    service.look(0, "b1c3", () => {}); await flush();
+    vi.setSystemTime(21_000);
+    service.look(0, "g1f3", () => {});
+    engine.emit("bestmove b1c3"); await flush();
+    expect(engine.searches.at(-1)).toBe("go movetime 30000 searchmoves g1f3");
+  });
+  it("two preemptions add up (10 s + 5 s read → 15 s left)", async () => {
+    const { service, engine } = await looking();
+    service.look(0, "b1c3", () => {}); await flush();
+    vi.setSystemTime(11_000); void service.focus(0, ["a4a5"]);
+    engine.emit("bestmove b1c3"); await flush();
+    engine.finish(3, "a4a5"); await flush();
+    expect(engine.searches.at(-1)).toBe("go movetime 20000 searchmoves b1c3");
+    vi.setSystemTime(16_000); void service.focus(0, ["a4a5"]);
+    engine.emit("bestmove b1c3"); await flush();
+    engine.finish(3, "a4a5"); await flush();
+    expect(engine.searches.at(-1)).toBe("go movetime 15000 searchmoves b1c3");
+    expect(service.status.lookSpent).toBe(15000);
+  });
+  it("the 100 ms floor once the time is used up", async () => {
+    const { service, engine } = await looking();
+    service.look(0, "b1c3", () => {}); await flush();
+    vi.setSystemTime(40_000); void service.focus(0, ["a4a5"]);
+    engine.emit("bestmove b1c3"); await flush();
+    engine.finish(3, "a4a5"); await flush();
+    expect(engine.searches.at(-1)).toBe("go movetime 100 searchmoves b1c3");
+  });
+  it("a network change drops the look (it does not come back after the re-analysis)", async () => {
+    const { service, engine } = await looking();
+    service.look(0, "b1c3", () => {}); await flush();
+    const applied = service.setNetwork(null);
+    engine.emit("bestmove b1c3"); await flush(); await applied;
+    engine.finish(); await flush();
+    expect(engine.searches.filter((s) => s.includes("searchmoves b1c3"))).toHaveLength(1);
+  });
+  it("a look on a max ply (review of a game where max is to move) is not a max search", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const { service, engine } = setup();
+    service.sync("g", [position(0, "c", { max: true })]);
+    await flush(); await service.ready;
+    engine.finish(); await flush();
+    const updates = [];
+    vi.setSystemTime(2000);
+    service.look(0, "b1c3", (u) => updates.push(u)); await flush();
+    expect(engine.searches.at(-1)).toBe("go movetime 30000 searchmoves b1c3");
+    engine.emit(exact(8, 5));
+    expect(service.status).toMatchObject({ maxSince: null, maxMovetime: null });
+    service.moveNow(2000);
+    expect(engine.commands).not.toContain("stop");
+  });
+  it("a disabled engine drops the look", async () => {
+    const engines = [new FakeEngine(), new FakeEngine()], crashes = [];
+    const createEngine = vi.fn(async ({ onError }) => { crashes.push(onError); return engines[crashes.length - 1]; });
+    const { service } = setup({ createEngine });
+    service.sync("a", [position(0)]); await service.ready;
+    engines[0].finish(); await tick();
+    const updates = [];
+    service.look(0, "b1c3", (u) => updates.push(u));
+    crashes[0](new Error("worker crashed")); await tick(); await tick();
+    crashes[1](new Error("crashed again")); await tick(); await tick();
+    expect(service.status.state).toBe("disabled");
+    expect(service.status).toMatchObject({ lookSpent: null, lookMove: null });
+    expect(updates.at(-1)).toMatchObject({ ended: true, done: false });
+    expect(service.look(0, "b1c3", () => {})).toBe(false);
   });
 });
